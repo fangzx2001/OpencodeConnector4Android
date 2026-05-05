@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">OConnector</string>
+    <string name="connection_title">连接服务器</string>
+    <string name="host_label">服务器地址</string>
+    <string name="port_label">端口</string>
+    <string name="connect_button">连接</string>
+    <string name="disconnect_button">断开</string>
+    <string name="sessions_title">会话列表</string>
+    <string name="new_session">新建会话</string>
+    <string name="send_message">发送</string>
+    <string name="input_hint">输入消息...</string>
+    <string name="thinking">思考中...</string>
+    <string name="empty_session">暂无会话</string>
+    <string name="empty_chat">发送第一条消息开始对话</string>
+</resources>

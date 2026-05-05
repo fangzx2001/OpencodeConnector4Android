@@ -1,0 +1,212 @@
+package com.opencode.remote.data.api
+
+import android.util.Log
+import android.util.Base64
+import com.opencode.remote.data.api.dto.*
+import io.ktor.client.*
+import kotlinx.serialization.ExperimentalSerializationApi
+import io.ktor.client.call.*
+import io.ktor.client.engine.okhttp.*
+import io.ktor.client.plugins.*
+import io.ktor.client.plugins.contentnegotiation.*
+import io.ktor.client.request.*
+import io.ktor.http.*
+import io.ktor.serialization.kotlinx.json.*
+import kotlinx.serialization.json.Json
+import javax.inject.Inject
+
+/**
+ * REST API client for OpenCode server v1.14.x
+ *
+ * All routes match actual server paths (verified via curl):
+ *   GET  /session?list              → List<SessionInfo>
+ *   POST /session                   → CreateSessionResponse
+ *   GET  /session/{id}              → SessionInfo
+ *   DELETE /session/{id}            → 200 OK
+ *   POST /session/{id}/fork         → CreateSessionResponse
+ *   POST /session/{id}/abort        → 200 OK
+ *   GET  /session/{id}/message      → List<MessageInfo>
+ *   POST /session/{id}/prompt_async → 204 No Content (async, AI output via SSE)
+ *   GET  /session/{id}/todo         → List<TodoItem>
+ *   GET  /project/current           → ProjectInfo
+ */
+class OConnectorApiClient @Inject constructor(
+    private val json: Json,
+) {
+
+    private var authHeader: String? = null
+
+    @OptIn(ExperimentalSerializationApi::class)
+    private var client: HttpClient = createClient()
+
+    private fun createClient(): HttpClient = HttpClient(OkHttp) {
+        install(ContentNegotiation) { json(json) }
+        install(HttpTimeout) {
+            requestTimeoutMillis = 30_000
+            connectTimeoutMillis = 10_000
+            socketTimeoutMillis = 30_000
+        }
+        defaultRequest {
+            contentType(ContentType.Application.Json)
+            authHeader?.let { header(HttpHeaders.Authorization, it) }
+        }
+    }
+
+    companion object {
+        private const val TAG = "OConnectorApiClient"
+    }
+
+    /**
+     * Configure (or reconfigure) the client with connection parameters.
+     * Called by the repository when a new connection is established.
+     */
+    fun configure(baseUrl: String, username: String = "", password: String = "") {
+        close()
+        authHeader = if (password.isNotEmpty()) {
+            "Basic " + Base64.encodeToString(
+                "${username.ifEmpty { "opencode" }}:$password".toByteArray(),
+                Base64.NO_WRAP
+            )
+        } else null
+        client = HttpClient(OkHttp) {
+            install(ContentNegotiation) { json(json) }
+            install(HttpTimeout) {
+                requestTimeoutMillis = 30_000
+                connectTimeoutMillis = 10_000
+                socketTimeoutMillis = 30_000
+            }
+            defaultRequest {
+                url(baseUrl)
+                contentType(ContentType.Application.Json)
+                authHeader?.let { header(HttpHeaders.Authorization, it) }
+            }
+        }
+    }
+
+    // ─── Sessions ──────────────────────────────────────────────────────
+
+    /** GET /session?list → returns array directly. Optional directory filter. */
+    suspend fun listSessions(directory: String? = null): List<SessionInfo> =
+        client.get("/session") {
+            parameter("list", "")
+            directory?.let {
+                parameter("directory", it)
+                header("x-opencode-directory", it)
+            }
+        }.body<List<SessionInfo>>()
+
+    /** POST /session with empty body → returns new session. Optional directory to set project. */
+    suspend fun createSession(directory: String? = null): CreateSessionResponse =
+        client.post("/session") {
+            setBody("{}")
+            directory?.let {
+                parameter("directory", it)
+                header("x-opencode-directory", it)
+            }
+        }.body<CreateSessionResponse>()
+
+    /** GET /session/{id} */
+    suspend fun getSession(id: String, directory: String? = null): SessionInfo =
+        client.get("/session/$id") {
+            directory?.let {
+                parameter("directory", it)
+                header("x-opencode-directory", it)
+            }
+        }.body<SessionInfo>()
+
+    /** DELETE /session/{id} */
+    suspend fun deleteSession(id: String, directory: String? = null) {
+        client.delete("/session/$id") {
+            directory?.let {
+                parameter("directory", it)
+                header("x-opencode-directory", it)
+            }
+        }
+    }
+
+    /** POST /session/{id}/fork with empty body */
+    suspend fun forkSession(id: String, directory: String? = null): CreateSessionResponse =
+        client.post("/session/$id/fork") {
+            setBody("{}")
+            directory?.let {
+                parameter("directory", it)
+                header("x-opencode-directory", it)
+            }
+        }.body<CreateSessionResponse>()
+
+    /** POST /session/{id}/abort */
+    suspend fun abortSession(id: String, directory: String? = null) {
+        client.post("/session/$id/abort") {
+            directory?.let {
+                parameter("directory", it)
+                header("x-opencode-directory", it)
+            }
+        }
+    }
+
+    // ─── Messages ──────────────────────────────────────────────────────
+
+    /** GET /session/{id}/message → returns array directly, with large outputs truncated */
+    suspend fun getMessages(id: String, directory: String? = null): List<MessageInfo> =
+        client.get("/session/$id/message") {
+            directory?.let {
+                parameter("directory", it)
+                header("x-opencode-directory", it)
+            }
+        }.body<List<MessageInfo>>().map { msg -> msg.truncateLargeText() }
+
+    /**
+     * POST /session/{id}/prompt_async — 异步发送（HTTP 204, 立即返回）
+     * Body: {"parts":[{"type":"text","text":"user message"}],"agent":"optional"}
+     * AI 生成通过 SSE 事件流实时推送（message.part.delta, message.completed）
+     */
+    suspend fun sendMessage(sessionId: String, text: String, agent: String? = null, directory: String? = null) {
+        client.post("/session/$sessionId/prompt_async") {
+            setBody(SendMessageRequest(parts = listOf(SendMessagePart(text = text)), agent = agent))
+            directory?.let {
+                parameter("directory", it)
+                header("x-opencode-directory", it)
+            }
+        }
+    }
+
+    // ─── Todo ──────────────────────────────────────────────────────────
+
+    /** GET /session/{id}/todo → returns array directly */
+    suspend fun getTodoList(id: String, directory: String? = null): List<TodoItem> =
+        client.get("/session/$id/todo") {
+            directory?.let {
+                parameter("directory", it)
+                header("x-opencode-directory", it)
+            }
+        }.body<List<TodoItem>>()
+
+    // ─── Project ───────────────────────────────────────────────────────
+
+    /** GET /project/current → flat ProjectInfo (no wrapper) */
+    suspend fun getCurrentProject(): ProjectInfo =
+        client.get("/project/current").body<ProjectInfo>()
+
+    /** GET /project → list all known projects */
+    suspend fun listProjects(): List<ProjectInfo> =
+        client.get("/project").body<List<ProjectInfo>>()
+
+    /** Test connectivity by hitting a lightweight endpoint */
+    suspend fun testConnection(): Boolean = try {
+        getCurrentProject()
+        true
+    } catch (e: Exception) {
+        Log.w(TAG, "Test connection failed: ${e.javaClass.simpleName}: ${e.message}")
+        false
+    }
+
+    // ─── Agents ─────────────────────────────────────────────────────────
+
+    /** GET /agent → returns array of available agents */
+    suspend fun listAgents(): List<AgentInfo> =
+        client.get("/agent").body<List<AgentInfo>>()
+
+    fun close() {
+        try { client.close() } catch (_: Exception) {}
+    }
+}

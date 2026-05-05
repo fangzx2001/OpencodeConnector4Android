@@ -1,0 +1,40 @@
+# Built application files
+*.aab
+*.ap_
+*.dex
+
+# Build directories
+build/
+*/build/
+
+# Debug APK (keep release)
+app/build/outputs/apk/debug/
+
+# Android Studio / IntelliJ
+.idea/
+*.iml
+*.iws
+*.ipr
+.navigation/
+captures/
+
+# Gradle cache
+.gradle/
+local.properties
+
+# Kotlin
+*.kotlin_module
+
+# Log files
+*.log
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Sisyphus internal
+.sisyphus/
+
+# Keystore / signing
+*.jks
+*.keystore
