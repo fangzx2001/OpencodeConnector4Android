@@ -4,6 +4,9 @@ import android.util.Log
 import android.util.Base64
 import com.opencode.remote.data.api.dto.*
 import io.ktor.client.*
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.serialization.ExperimentalSerializationApi
 import io.ktor.client.call.*
 import io.ktor.client.engine.okhttp.*
@@ -54,6 +57,8 @@ class OConnectorApiClient @Inject constructor(
 
     companion object {
         private const val TAG = "OConnectorApiClient"
+        /** Maximum number of messages to load from server. Prevents OOM on long sessions. */
+        private const val MAX_MESSAGES = 50
     }
 
     /**
@@ -85,15 +90,19 @@ class OConnectorApiClient @Inject constructor(
 
     // ─── Sessions ──────────────────────────────────────────────────────
 
-    /** GET /session?list → returns array directly. Optional directory filter. */
-    suspend fun listSessions(directory: String? = null): List<SessionInfo> =
-        client.get("/session") {
+    /** GET /session?list → returns array directly. Optional directory/scope filter. */
+    suspend fun listSessions(directory: String? = null, scope: String? = null): List<SessionInfo> {
+        val sessions = client.get("/session") {
             parameter("list", "")
             directory?.let {
                 parameter("directory", it)
                 header("x-opencode-directory", it)
             }
+            scope?.let { parameter("scope", it) }
         }.body<List<SessionInfo>>()
+        Log.d(TAG, "Loaded ${sessions.size} sessions for dir=$directory scope=$scope")
+        return sessions
+    }
 
     /** POST /session with empty body → returns new session. Optional directory to set project. */
     suspend fun createSession(directory: String? = null): CreateSessionResponse =
@@ -146,19 +155,38 @@ class OConnectorApiClient @Inject constructor(
 
     // ─── Messages ──────────────────────────────────────────────────────
 
-    /** GET /session/{id}/message → returns array directly, with large outputs truncated */
-    suspend fun getMessages(id: String, directory: String? = null): List<MessageInfo> =
-        client.get("/session/$id/message") {
+    /**
+     * GET /session/{id}/message → returns array directly.
+     *
+     * Memory optimization:
+     * 1. Server-side: passes ?limit=N to only fetch recent messages (prevents huge response)
+     * 2. Client-side: caps to [MAX_MESSAGES] as safety net
+     *
+     * The OpenCode server supports ?limit=N (cursor-based pagination).
+     * Without it, ALL messages including huge tool outputs are returned → OOM.
+     */
+    suspend fun getMessages(id: String, directory: String? = null): List<MessageInfo> {
+        val messages = client.get("/session/$id/message") {
+            parameter("limit", MAX_MESSAGES)
             directory?.let {
                 parameter("directory", it)
                 header("x-opencode-directory", it)
             }
-        }.body<List<MessageInfo>>().map { msg -> msg.truncateLargeText() }
+        }.body<List<MessageInfo>>()
+
+        // Safety net: if server ignores limit or returns more
+        return if (messages.size > MAX_MESSAGES) {
+            Log.w(TAG, "Server returned ${messages.size} messages despite limit=$MAX_MESSAGES, truncating")
+            messages.takeLast(MAX_MESSAGES)
+        } else {
+            messages
+        }
+    }
 
     /**
      * POST /session/{id}/prompt_async — 异步发送（HTTP 204, 立即返回）
      * Body: {"parts":[{"type":"text","text":"user message"}],"agent":"optional"}
-     * AI 生成通过 SSE 事件流实时推送（message.part.delta, message.completed）
+     * AI 生成通过 SSE 事件流实时推送（message.part.delta, message.completed)
      */
     suspend fun sendMessage(sessionId: String, text: String, agent: String? = null, directory: String? = null) {
         client.post("/session/$sessionId/prompt_async") {
@@ -190,6 +218,66 @@ class OConnectorApiClient @Inject constructor(
     /** GET /project → list all known projects */
     suspend fun listProjects(): List<ProjectInfo> =
         client.get("/project").body<List<ProjectInfo>>()
+
+    /**
+     * Fetch sessions from ALL known projects.
+     *
+     * OpenCode scopes sessions by project (determined by directory).
+     * A single server call only returns sessions for one project.
+     *
+     * Strategy:
+     *   1. GET /project → discover all known projects
+     *   2. For normal projects (real worktree): GET /session?list&directory=<worktree>
+     *   3. For global project (worktree="/"): GET /session?list&directory=/&scope=project
+     *      — scope=project skips directory matching, returns ALL sessions for that project_id
+     *   4. Merge and deduplicate all results
+     *
+     * Falls back to a single unfiltered request if project list fails.
+     */
+    suspend fun listAllSessions(): List<SessionInfo> {
+        val allSessions = mutableListOf<SessionInfo>()
+        val seenIds = mutableSetOf<String>()
+
+        try {
+            val projects = listProjects()
+            Log.d(TAG, "Discovered ${projects.size} projects: ${projects.map { "${it.id}=${it.worktree}" }}")
+
+            // Query sessions for each project in parallel
+            val results = coroutineScope {
+                projects.map { project ->
+                    async {
+                        try {
+                            val isGlobal = project.worktree == "/" || project.worktree == null
+                            if (isGlobal) {
+                                // scope=project skips directory filter, returns all sessions for this project_id
+                                listSessions(directory = project.worktree ?: "/", scope = "project")
+                            } else {
+                                listSessions(directory = project.worktree)
+                            }
+                        } catch (e: Exception) {
+                            Log.w(TAG, "Failed to load sessions for project ${project.id} (${project.worktree}): ${e.message}")
+                            emptyList<SessionInfo>()
+                        }
+                    }
+                }.awaitAll()
+            }
+
+            for (sessions in results) {
+                for (session in sessions) {
+                    if (seenIds.add(session.id)) {
+                        allSessions.add(session)
+                    }
+                }
+            }
+
+            Log.d(TAG, "Merged ${allSessions.size} unique sessions from ${projects.size} projects")
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to list projects, falling back to single query: ${e.message}")
+            return listSessions(null)
+        }
+
+        return allSessions
+    }
 
     /** Test connectivity by hitting a lightweight endpoint */
     suspend fun testConnection(): Boolean = try {

@@ -32,6 +32,8 @@ interface OConnectorRepository {
     // ─── Session Operations ──────────────────────────────────────────
 
     suspend fun listSessions(directory: String? = null): List<SessionInfo>
+    /** Fetch sessions from ALL known projects (multi-directory query). */
+    suspend fun listAllSessions(): List<SessionInfo>
     suspend fun createSession(directory: String? = null): CreateSessionResponse
     suspend fun getSession(sessionId: String, directory: String? = null): SessionInfo
     suspend fun deleteSession(sessionId: String, directory: String? = null)
@@ -123,6 +125,9 @@ class OConnectorRepositoryImpl @Inject constructor(
 
     override suspend fun listSessions(directory: String?): List<SessionInfo> =
         requireClient().listSessions(directory)
+
+    override suspend fun listAllSessions(): List<SessionInfo> =
+        requireClient().listAllSessions()
 
     override suspend fun createSession(directory: String?): CreateSessionResponse =
         requireClient().createSession(directory)

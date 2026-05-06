@@ -160,4 +160,13 @@ class ConnectionViewModel @Inject constructor(
             }
         }
     }
+
+    /** Load persisted dark mode into AppLocale. Call once at app startup. */
+    fun loadDarkMode() {
+        viewModelScope.launch {
+            preferences.darkMode.take(1).collect { enabled ->
+                com.opencode.remote.ui.strings.AppLocale.darkMode = enabled
+            }
+        }
+    }
 }

@@ -17,6 +17,7 @@ data class ResponseSegment(
     val type: String,  // "thinking", "text", "tool"
     val text: String,
     val isStreaming: Boolean = false,  // true if still receiving content
+    val id: String? = null,  // callID for tool segments, null for text/thinking — prevents tool calls from overwriting each other
 )
 
 /** Session metadata — changes infrequently (init, session events). */
@@ -98,10 +99,11 @@ class ChatViewModel @Inject constructor(
      * - Therefore no synchronization (e.g. [ConcurrentHashMap.newKeySet]) is needed.
      */
     private val completedMessageIds = mutableSetOf<String>()
+    private var deltaLogCounter = 0
 
     companion object {
         private const val TAG = "ChatViewModel"
-        private const val MAX_STREAMING_TEXT = 50_000
+        private const val MAX_STREAMING_TEXT = 10_000
     }
 
     /**
@@ -290,10 +292,14 @@ class ChatViewModel @Inject constructor(
             "message.part.delta" -> {
                 val chunk = props.delta ?: return
                 val segType = if (props.field == "reasoning") "thinking" else "text"
+                val callId = props.callID
                 val segments = _uiState.value.streamingSegments
-                val updated = appendToLastSegment(segments, segType, chunk)
+                val updated = appendToLastSegment(segments, segType, chunk, id = callId)
                 repository.setStreamingBlocks(updated)  // stores segments now
-                Log.d(TAG, "delta field=${props.field} type=$segType chunk=${chunk.take(30)} segs=${updated.size}")
+                deltaLogCounter++
+                if (deltaLogCounter % 50 == 0) {
+                    Log.d(TAG, "delta #$deltaLogCounter field=${props.field} type=$segType segs=${updated.size}")
+                }
                 _uiState.update {
                     it.copy(streaming = it.streaming.copy(isStreaming = true, isSending = false, streamingSegments = updated))
                 }
@@ -305,6 +311,11 @@ class ChatViewModel @Inject constructor(
                 val partMessageId = part.messageID ?: return
                 val pendingId = _uiState.value.pendingAssistantMessageId ?: return
                 if (partMessageId != pendingId) return
+
+                // Refresh todo list when todowrite tool completes
+                if (part.tool == "todowrite" && part.state?.status == "completed") {
+                    loadTodoList()
+                }
 
                 val segType = when (part.type) {
                     "reasoning" -> "thinking"
@@ -321,10 +332,11 @@ class ChatViewModel @Inject constructor(
                 }
                 if (partText.isBlank()) return
 
-                Log.d(TAG, "part.updated type=${part.type} -> segType=$segType msg=${partMessageId.take(8)}")
+                val callId = part.callID
+                Log.d(TAG, "part.updated type=${part.type} -> segType=$segType callId=${callId?.take(8)} msg=${partMessageId.take(8)}")
 
                 val segments = _uiState.value.streamingSegments
-                val updated = putSegment(segments, segType, partText)
+                val updated = putSegment(segments, segType, partText, id = callId)
                 repository.setStreamingBlocks(updated)
                 _uiState.update {
                     it.copy(streaming = it.streaming.copy(isStreaming = true, isSending = false, streamingSegments = updated))
@@ -386,6 +398,7 @@ class ChatViewModel @Inject constructor(
                             ),
                         )
                     }
+                    deltaLogCounter = 0
                     repository.clearStreaming()
 
                     viewModelScope.launch {
@@ -429,10 +442,10 @@ class ChatViewModel @Inject constructor(
         }
     }
 
-    /** Append incremental chunk. If last segment has same type, append to it. Otherwise create new segment.
+    /** Append incremental chunk. If last segment has same type AND id, append to it. Otherwise create new segment.
      *  Truncates if accumulated text exceeds limit to prevent OOM. */
-    private fun appendToLastSegment(segments: List<ResponseSegment>, type: String, chunk: String): List<ResponseSegment> {
-        if (segments.isNotEmpty() && segments.last().type == type) {
+    private fun appendToLastSegment(segments: List<ResponseSegment>, type: String, chunk: String, id: String? = null): List<ResponseSegment> {
+        if (segments.isNotEmpty() && segments.last().type == type && segments.last().id == id) {
             val combined = segments.last().text + chunk
             val truncated = if (combined.length > MAX_STREAMING_TEXT) {
                 combined.substring(0, MAX_STREAMING_TEXT) + "\n\n… [truncated]"
@@ -443,19 +456,20 @@ class ChatViewModel @Inject constructor(
         val safeChunk = if (chunk.length > MAX_STREAMING_TEXT) {
             chunk.take(MAX_STREAMING_TEXT) + "\n\n… [truncated]"
         } else chunk
-        return segments + ResponseSegment(type = type, text = safeChunk, isStreaming = true)
+        return segments + ResponseSegment(type = type, text = safeChunk, isStreaming = true, id = id)
     }
 
-    /** Update or create a segment with full text (from part.updated). Truncates if text exceeds limit. */
-    private fun putSegment(segments: List<ResponseSegment>, type: String, fullText: String): List<ResponseSegment> {
+    /** Update or create a segment with full text (from part.updated). Truncates if text exceeds limit.
+     *  Matches by both type AND id to prevent tool calls from overwriting each other. */
+    private fun putSegment(segments: List<ResponseSegment>, type: String, fullText: String, id: String? = null): List<ResponseSegment> {
         val truncatedText = if (fullText.length > MAX_STREAMING_TEXT) {
             fullText.take(MAX_STREAMING_TEXT) + "\n\n… [truncated]"
         } else fullText
-        val lastIdx = segments.indexOfLast { it.type == type }
+        val lastIdx = segments.indexOfLast { it.type == type && it.id == id }
         return if (lastIdx >= 0) {
-            segments.subList(0, lastIdx) + ResponseSegment(type, truncatedText, isStreaming = true) + segments.subList(lastIdx + 1, segments.size)
+            segments.subList(0, lastIdx) + ResponseSegment(type, truncatedText, isStreaming = true, id = id) + segments.subList(lastIdx + 1, segments.size)
         } else {
-            segments + ResponseSegment(type = type, text = truncatedText, isStreaming = true)
+            segments + ResponseSegment(type = type, text = truncatedText, isStreaming = true, id = id)
         }
     }
 
@@ -475,6 +489,7 @@ class ChatViewModel @Inject constructor(
 
         // Clear completed IDs from previous turn — new conversation turn starting
         completedMessageIds.clear()
+        deltaLogCounter = 0
 
         // 1. Immediately add user message to local list (optimistic update)
         val localUserMsg = MessageInfo(

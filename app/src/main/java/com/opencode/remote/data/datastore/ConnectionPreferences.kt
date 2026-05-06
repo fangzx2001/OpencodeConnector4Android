@@ -45,6 +45,7 @@ class ConnectionPreferences @Inject constructor(
         val USE_TLS = booleanPreferencesKey("connection_use_tls")
         val AUTO_RECONNECT = booleanPreferencesKey("connection_auto_reconnect")
         val LANGUAGE = stringPreferencesKey("app_language")
+        val DARK_MODE = booleanPreferencesKey("app_dark_mode")
     }
 
     private val masterKey by lazy {
@@ -126,11 +127,28 @@ class ConnectionPreferences @Inject constructor(
             emit("en")
         }
 
+    val darkMode: Flow<Boolean> = context.dataStore.data
+        .map { prefs ->
+            prefs[Keys.DARK_MODE] ?: false
+        }
+        .catch { e ->
+            Log.e(TAG, "Failed to read dark mode", e)
+            emit(false)
+        }
+
     suspend fun saveLanguage(lang: String) {
         try {
             context.dataStore.edit { it[Keys.LANGUAGE] = lang }
         } catch (e: Exception) {
             Log.e(TAG, "Failed to save language", e)
+        }
+    }
+
+    suspend fun saveDarkMode(enabled: Boolean) {
+        try {
+            context.dataStore.edit { it[Keys.DARK_MODE] = enabled }
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to save dark mode", e)
         }
     }
 

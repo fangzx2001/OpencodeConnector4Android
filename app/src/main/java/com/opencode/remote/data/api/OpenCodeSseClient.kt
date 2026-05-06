@@ -113,7 +113,7 @@ class OConnectorSseClient @Inject constructor(
                             if (jsonStr.isNotEmpty()) {
                                 try {
                                     val event = json.decodeFromString<ServerEvent>(jsonStr)
-                                    trySend(event)
+                                    send(event)
                                 } catch (e: Exception) {
                                     Log.w(TAG, "Failed to parse SSE event: $jsonStr", e)
                                 }

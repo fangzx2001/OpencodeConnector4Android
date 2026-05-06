@@ -31,8 +31,11 @@ fun ConnectionScreen(
     val s = AppLocale.strings
     var showLangPicker by remember { mutableStateOf(false) }
 
-    // Load persisted language on first composition
-    LaunchedEffect(Unit) { viewModel.loadLanguage() }
+    // Load persisted language and dark mode on first composition
+    LaunchedEffect(Unit) {
+        viewModel.loadLanguage()
+        viewModel.loadDarkMode()
+    }
 
     // Navigate when connected
     LaunchedEffect(uiState.isConnected) {

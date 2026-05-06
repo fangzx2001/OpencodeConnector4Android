@@ -103,6 +103,10 @@ fun ChatScreen(
                                 Icon(Icons.Default.Checklist, contentDescription = "Todo")
                             }
                         }
+                    } else {
+                        IconButton(onClick = viewModel::toggleTodoPanel) {
+                            Icon(Icons.Default.Checklist, contentDescription = "Todo")
+                        }
                     }
                     if (uiState.isSending || uiState.isStreaming) {
                         IconButton(onClick = viewModel::abortSession) {

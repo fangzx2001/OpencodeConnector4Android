@@ -20,7 +20,6 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import com.opencode.remote.data.api.dto.SessionInfo
 import com.opencode.remote.ui.components.ErrorSnackbar
 import com.opencode.remote.ui.strings.AppLocale
-
 // ─── Level 1: Projects List ──────────────────────────────────────────────
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -57,6 +56,12 @@ fun SessionsScreen(
                     }
                 },
                 actions = {
+                    IconButton(onClick = { viewModel.toggleDarkMode() }) {
+                        Icon(
+                            if (AppLocale.darkMode) Icons.Default.LightMode else Icons.Default.DarkMode,
+                            contentDescription = if (AppLocale.darkMode) "Light mode" else "Dark mode",
+                        )
+                    }
                     IconButton(onClick = { viewModel.loadSessions() }) {
                         Icon(Icons.Default.Refresh, contentDescription = s.refresh)
                     }
@@ -104,11 +109,11 @@ fun SessionsScreen(
                         uiState.sessions
                             .groupBy { it.directory ?: "unknown" }
                             .mapValues { (_, sessions) ->
-                                sessions.sortedByDescending { it.time?.created ?: 0L }
+                                sessions.sortedByDescending { it.time?.updated ?: it.time?.created ?: 0L }
                             }
                             .toList()
                             .sortedByDescending { (_, sessions) ->
-                                sessions.maxOfOrNull { it.time?.created ?: 0L } ?: 0L
+                                sessions.maxOfOrNull { it.time?.updated ?: it.time?.created ?: 0L } ?: 0L
                             }
                     }
 
@@ -232,7 +237,7 @@ fun ProjectSessionsScreen(
     val projectSessions = remember(uiState.sessions, directory) {
         uiState.sessions
             .filter { it.directory == directory }
-            .sortedByDescending { it.time?.created ?: 0L }
+            .sortedByDescending { it.time?.updated ?: it.time?.created ?: 0L }
     }
 
     Scaffold(

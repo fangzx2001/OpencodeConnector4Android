@@ -1,5 +1,6 @@
 package com.opencode.remote.data.api.dto
 
+import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
 /**
@@ -46,6 +47,8 @@ data class EventProperties(
     val sessionID: String? = null,
     val messageID: String? = null,
     val partID: String? = null,
+    @SerialName("callID")
+    val callID: String? = null,
     val text: String? = null,
     val delta: String? = null,
     val field: String? = null,

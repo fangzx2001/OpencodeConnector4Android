@@ -6,6 +6,7 @@ import androidx.compose.runtime.*
 
 object AppLocale {
     var language by mutableStateOf("en")
+    var darkMode by mutableStateOf(false)
     val strings: AppStrings get() = if (language == "zh") zhStrings else enStrings
 }
 
@@ -239,7 +240,7 @@ val enStrings = AppStrings(
     helpSecBullet2 = "Use Tailscale / ZeroTier for remote access",
     helpSecBullet3 = "Never expose the port to the public internet",
     helpSecBullet4 = "Do not use on public WiFi",
-    helpVersion = "OConnector v1.0.0",
+    helpVersion = "OConnector v1.1.0",
 
     // Error messages
     errEnterIp = "Please enter server IP address",
@@ -363,7 +364,7 @@ val zhStrings = AppStrings(
     helpSecBullet2 = "远程访问请使用 Tailscale / ZeroTier 加密通道",
     helpSecBullet3 = "不要将端口暴露到公网",
     helpSecBullet4 = "不要在公共 WiFi 下使用",
-    helpVersion = "OConnector v1.0.0",
+    helpVersion = "OConnector v1.1.0",
 
     // Error messages
     errEnterIp = "请输入服务器 IP 地址",

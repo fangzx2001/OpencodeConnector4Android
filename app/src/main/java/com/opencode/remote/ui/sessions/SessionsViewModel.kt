@@ -4,7 +4,9 @@ import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.opencode.remote.data.api.dto.SessionInfo
+import com.opencode.remote.data.datastore.ConnectionPreferences
 import com.opencode.remote.data.repository.OConnectorRepository
+import com.opencode.remote.ui.strings.AppLocale
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
@@ -22,6 +24,7 @@ data class SessionsUiState(
 @HiltViewModel
 class SessionsViewModel @Inject constructor(
     private val repository: OConnectorRepository,
+    private val prefs: ConnectionPreferences,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(SessionsUiState())
@@ -37,6 +40,23 @@ class SessionsViewModel @Inject constructor(
     init {
         loadSessions()
         loadProjectName()
+        observeDarkMode()
+    }
+
+    private fun observeDarkMode() {
+        viewModelScope.launch {
+            prefs.darkMode.collect { enabled ->
+                AppLocale.darkMode = enabled
+            }
+        }
+    }
+
+    fun toggleDarkMode() {
+        viewModelScope.launch {
+            val newValue = !AppLocale.darkMode
+            AppLocale.darkMode = newValue
+            prefs.saveDarkMode(newValue)
+        }
     }
 
     fun loadSessions() {
@@ -47,7 +67,7 @@ class SessionsViewModel @Inject constructor(
                 _uiState.update { it.copy(isLoading = true, error = null) }
             }
             try {
-                val sessions = repository.listSessions()
+                val sessions = repository.listAllSessions()
                 _uiState.update { it.copy(sessions = sessions, isLoading = false) }
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to load sessions", e)

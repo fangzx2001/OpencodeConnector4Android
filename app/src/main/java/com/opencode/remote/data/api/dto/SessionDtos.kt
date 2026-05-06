@@ -196,17 +196,19 @@ data class SendMessageResponse(
 /**
  * Todo 项目
  * 实际 API: GET /session/{id}/todo 返回 List<TodoItem>
+ * Server returns: { content, status, priority }
+ * No "id" field — use index as fallback
  */
 @Serializable
 data class TodoItem(
-    val id: String,
     val content: String,
     val status: String,
+    val priority: String? = null,
 )
 
-// ─── Truncation helpers (prevent OOM from huge tool outputs) ─────────
+// ─── Truncation helpers (safety net — main truncation happens in OpenCodeApiClient at raw JSON level) ─────────
 
-private const val MAX_TEXT_LENGTH = 50_000
+private const val MAX_TEXT_LENGTH = 5_000
 private const val TRUNCATION_NOTICE = "\n\n… [truncated]"
 
 private fun String?.truncateIfNeeded(): String? {
