@@ -6,6 +6,7 @@
 # Build directories
 build/
 */build/
+app/release/
 
 # Debug APK (keep release)
 app/build/outputs/apk/debug/
@@ -31,6 +32,14 @@ local.properties
 # OS files
 .DS_Store
 Thumbs.db
+
+# Screenshots and images (use GitHub releases for assets)
+*.jpg
+*.jpeg
+*.png
+*.gif
+*.bmp
+*.webp
 
 # Sisyphus internal
 .sisyphus/
