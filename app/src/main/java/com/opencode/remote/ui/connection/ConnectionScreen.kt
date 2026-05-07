@@ -330,6 +330,10 @@ fun ConnectionScreen(
         UpdateDialog(
             version = avail.version,
             changelog = avail.changelog,
+            changelogTitle = s.updateChangelog,
+            downloadText = s.updateDownload,
+            closeText = s.updateClose,
+            noChangelogText = "No changelog provided.",
             onDownload = {
                 showUpdateDialog = false
                 if (avail.downloadUrl != null) {

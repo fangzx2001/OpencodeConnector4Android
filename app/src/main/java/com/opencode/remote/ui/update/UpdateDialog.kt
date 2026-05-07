@@ -4,7 +4,6 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
@@ -19,12 +18,16 @@ import androidx.compose.ui.unit.dp
 fun UpdateDialog(
     version: String,
     changelog: String?,
+    changelogTitle: String,
+    downloadText: String,
+    closeText: String,
+    noChangelogText: String,
     onDownload: () -> Unit,
     onDismiss: () -> Unit
 ) {
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("New version: v$version") },
+        title = { Text("v$version") },
         text = {
             Column(
                 modifier = Modifier
@@ -32,24 +35,24 @@ fun UpdateDialog(
                     .verticalScroll(rememberScrollState())
             ) {
                 Text(
-                    text = "Changelog",
+                    text = changelogTitle,
                     style = MaterialTheme.typography.titleSmall
                 )
                 Spacer(modifier = Modifier.height(8.dp))
                 Text(
-                    text = changelog ?: "No changelog provided.",
+                    text = changelog ?: noChangelogText,
                     style = MaterialTheme.typography.bodyMedium
                 )
             }
         },
         confirmButton = {
             TextButton(onClick = onDownload) {
-                Text("Download")
+                Text(downloadText)
             }
         },
         dismissButton = {
             TextButton(onClick = onDismiss) {
-                Text("Close")
+                Text(closeText)
             }
         }
     )
