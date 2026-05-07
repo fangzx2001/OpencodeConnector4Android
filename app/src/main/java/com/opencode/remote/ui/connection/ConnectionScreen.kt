@@ -1,24 +1,33 @@
 package com.opencode.remote.ui.connection
 
+import android.content.Intent
+import android.net.Uri
+import android.widget.Toast
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Computer
+import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.HelpOutline
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
+import com.opencode.remote.data.download.DownloadHelper
 import com.opencode.remote.ui.strings.AppLocale
 import com.opencode.remote.ui.strings.enStrings
 import com.opencode.remote.ui.strings.zhStrings
+import com.opencode.remote.ui.update.UpdateDialog
+import com.opencode.remote.ui.update.UpdateUiState
+import com.opencode.remote.ui.update.UpdateViewModel
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -31,10 +40,16 @@ fun ConnectionScreen(
     val s = AppLocale.strings
     var showLangPicker by remember { mutableStateOf(false) }
 
+    val updateViewModel: UpdateViewModel = hiltViewModel()
+    val updateState by updateViewModel.uiState.collectAsState()
+    var showUpdateDialog by remember { mutableStateOf(false) }
+    val context = LocalContext.current
+
     // Load persisted language and dark mode on first composition
     LaunchedEffect(Unit) {
         viewModel.loadLanguage()
         viewModel.loadDarkMode()
+        updateViewModel.checkForUpdate()
     }
 
     // Navigate when connected
@@ -49,6 +64,16 @@ fun ConnectionScreen(
             TopAppBar(
                 title = { Text(s.appTitle) },
                 actions = {
+                    // Update button - appears when new version available
+                    if (updateState is UpdateUiState.Available) {
+                        IconButton(onClick = { showUpdateDialog = true }) {
+                            Icon(
+                                imageVector = Icons.Default.Download,
+                                contentDescription = "Update available",
+                                tint = MaterialTheme.colorScheme.primary
+                            )
+                        }
+                    }
                     // Language toggle
                     Box {
                         TextButton(onClick = { showLangPicker = true }) {
@@ -297,5 +322,29 @@ fun ConnectionScreen(
                 }
             }
         }
+    }
+
+    // Update dialog
+    if (showUpdateDialog && updateState is UpdateUiState.Available) {
+        val avail = updateState as UpdateUiState.Available
+        UpdateDialog(
+            version = avail.version,
+            changelog = avail.changelog,
+            onDownload = {
+                showUpdateDialog = false
+                if (avail.downloadUrl != null) {
+                    DownloadHelper.downloadApk(
+                        context,
+                        avail.downloadUrl,
+                        "OConnector-v${avail.version}.apk"
+                    )
+                    Toast.makeText(context, "Download started", Toast.LENGTH_SHORT).show()
+                } else {
+                    val intent = Intent(Intent.ACTION_VIEW, Uri.parse(avail.releaseUrl))
+                    context.startActivity(intent)
+                }
+            },
+            onDismiss = { showUpdateDialog = false }
+        )
     }
 }
