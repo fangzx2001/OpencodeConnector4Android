@@ -13,7 +13,7 @@
       "attributes": [],
       "versionCode": 3,
       "versionName": "1.1.1",
-      "outputFile": "app-release-unsigned.apk"
+      "outputFile": "app-release.apk"
     }
   ],
   "elementType": "File"
