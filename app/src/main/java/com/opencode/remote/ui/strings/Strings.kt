@@ -134,6 +134,20 @@ data class AppStrings(
     val errUnknown: String,
     val errSendFailed: String,
     val errAbortFailed: String,
+
+    // Update dialog
+    val updateAvailable: String,
+    val updateDownload: String,
+    val updateClose: String,
+    val updateChangelog: String,
+    val updateChecking: String,
+    val updateUpToDate: String,
+    val updateGithubFailed: String,
+
+    // Notification
+    val notificationRunning: String,
+    val notificationChannelName: String,
+    val notificationChannelDesc: String,
 )
 
 // ─── English ───────────────────────────────────────────────────────
@@ -260,6 +274,17 @@ val enStrings = AppStrings(
     errUnknown = "Unknown error",
     errSendFailed = "Send failed: %s",
     errAbortFailed = "Abort failed: %s",
+
+    updateAvailable = "Update Available",
+    updateDownload = "Download",
+    updateClose = "Close",
+    updateChangelog = "Changelog",
+    updateChecking = "Checking for updates...",
+    updateUpToDate = "Already up to date",
+    updateGithubFailed = "GitHub connection failed. Please connect to a suitable network.",
+    notificationRunning = "OConnector is running",
+    notificationChannelName = "OConnector Service",
+    notificationChannelDesc = "Keeps connection to server alive",
 )
 
 // ─── Chinese ───────────────────────────────────────────────────────
@@ -386,4 +411,15 @@ val zhStrings = AppStrings(
     errUnknown = "未知错误",
     errSendFailed = "发送失败: %s",
     errAbortFailed = "中断失败: %s",
+
+    updateAvailable = "发现新版本",
+    updateDownload = "下载",
+    updateClose = "关闭",
+    updateChangelog = "更新日志",
+    updateChecking = "正在检查更新...",
+    updateUpToDate = "已是最新版本",
+    updateGithubFailed = "GitHub 连接失败，请接入合适的网络环境",
+    notificationRunning = "OConnector 正在运行",
+    notificationChannelName = "OConnector 服务",
+    notificationChannelDesc = "保持与服务器的连接",
 )

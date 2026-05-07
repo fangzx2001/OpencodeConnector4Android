@@ -9,7 +9,11 @@ import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
 import dagger.hilt.components.SingletonComponent
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.serialization.ExperimentalSerializationApi
+import javax.inject.Named
 import kotlinx.serialization.json.Json
 import javax.inject.Singleton
 
@@ -40,5 +44,11 @@ abstract class AppModule {
         @Singleton
         fun provideSseClient(json: Json): OConnectorSseClient =
             OConnectorSseClient(json)
+
+        @Provides
+        @Singleton
+        @Named("applicationScope")
+        fun provideApplicationScope(): CoroutineScope =
+            CoroutineScope(SupervisorJob() + Dispatchers.Default)
     }
 }
