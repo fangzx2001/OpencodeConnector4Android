@@ -33,6 +33,9 @@ local.properties
 .DS_Store
 Thumbs.db
 
+# Release APK (distribute via GitHub Releases, not repo)
+release/
+
 # Screenshots and images (use GitHub releases for assets)
 *.jpg
 *.jpeg

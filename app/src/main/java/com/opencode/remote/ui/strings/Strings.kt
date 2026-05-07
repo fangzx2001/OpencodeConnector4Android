@@ -120,6 +120,14 @@ data class AppStrings(
     val helpSecBullet4: String,
     val helpVersion: String,
 
+    // Help - Update check
+    val helpUpdateTitle: String,
+    val helpUpdateBody: String,
+    val helpUpdateBullet1: String,
+    val helpUpdateBullet2: String,
+    val helpUpdateBullet3: String,
+    val helpUpdateBullet4: String,
+
     // Error messages
     val errEnterIp: String,
     val errInvalidPort: String,
@@ -260,6 +268,13 @@ val enStrings = AppStrings(
     helpSecBullet4 = "Do not use on public WiFi",
     helpVersion = "OConnector v${com.opencode.remote.BuildConfig.VERSION_NAME}",
 
+    helpUpdateTitle = "Check for Updates",
+    helpUpdateBody = "The app automatically checks GitHub for new versions when you open the connection page.",
+    helpUpdateBullet1 = "If a new version is available, a download icon (⬇) appears next to the language button",
+    helpUpdateBullet2 = "Tap the icon to view the changelog and download the update",
+    helpUpdateBullet3 = "The APK will be downloaded to your Downloads folder and installed automatically",
+    helpUpdateBullet4 = "If GitHub is unreachable, the update check is silently skipped",
+
     // Error messages
     errEnterIp = "Please enter server IP address",
     errInvalidPort = "Please enter a valid port (1-65535)",
@@ -396,6 +411,13 @@ val zhStrings = AppStrings(
     helpSecBullet3 = "不要将端口暴露到公网",
     helpSecBullet4 = "不要在公共 WiFi 下使用",
     helpVersion = "OConnector v${com.opencode.remote.BuildConfig.VERSION_NAME}",
+
+    helpUpdateTitle = "检查更新",
+    helpUpdateBody = "打开连接页面时，应用会自动检查 GitHub 上是否有新版本。",
+    helpUpdateBullet1 = "如果有新版本，语言按钮旁边会出现下载图标 (⬇)",
+    helpUpdateBullet2 = "点击图标可查看更新日志并下载更新",
+    helpUpdateBullet3 = "APK 会下载到手机的 Downloads 文件夹并自动弹出安装",
+    helpUpdateBullet4 = "如果无法连接 GitHub，更新检查会被静默跳过",
 
     // Error messages
     errEnterIp = "请输入服务器 IP 地址",

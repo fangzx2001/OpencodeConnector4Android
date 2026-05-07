@@ -94,6 +94,13 @@ fun HelpScreen(
             SectionBullet(s.helpSecBullet3)
             SectionBullet(s.helpSecBullet4)
 
+            SectionTitle(s.helpUpdateTitle)
+            SectionBody(s.helpUpdateBody)
+            SectionBullet(s.helpUpdateBullet1)
+            SectionBullet(s.helpUpdateBullet2)
+            SectionBullet(s.helpUpdateBullet3)
+            SectionBullet(s.helpUpdateBullet4)
+
             Spacer(modifier = Modifier.height(24.dp))
             Text(
                 text = s.helpVersion,
