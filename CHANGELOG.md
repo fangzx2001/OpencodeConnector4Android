@@ -2,6 +2,17 @@
 
 All notable changes to OConnector will be documented in this file.
 
+## [1.1.1] - 2026-05-07
+
+### Added
+
+- **HTTPS (TLS) support** — new "Use HTTPS (TLS)" toggle on the connection screen. Enable it when connecting through an HTTPS reverse proxy (e.g. Lucky, Nginx, Caddy). The app will use `https://` instead of `http://` for all API and SSE requests.
+- **Self-signed certificate support** — when TLS is enabled, an additional "Allow untrusted certificates" toggle appears. Turn it on to connect to servers using self-signed certificates (common in home LAN setups). Both settings are persisted across app restarts.
+
+### Fixed
+
+- **Chinese/non-ASCII path encoding** — loading sessions from directories containing Chinese characters (e.g. `C:\Users\...\论文阅读`) would fail with `Unexpected char 0x8bba in x-opencode-directory`. The `x-opencode-directory` HTTP header now properly URL-encodes the path value, making it compatible with RFC 7230 (ASCII-only headers).
+
 ## [1.1.0] - 2026-05-05
 
 ### Added

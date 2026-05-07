@@ -17,6 +17,11 @@ import io.ktor.http.*
 import io.ktor.serialization.kotlinx.json.*
 import kotlinx.serialization.json.Json
 import javax.inject.Inject
+import java.net.URLEncoder
+import javax.net.ssl.SSLContext
+import javax.net.ssl.X509TrustManager
+import java.security.cert.X509Certificate
+import javax.net.ssl.TrustManager
 
 /**
  * REST API client for OpenCode server v1.14.x
@@ -38,11 +43,12 @@ class OConnectorApiClient @Inject constructor(
 ) {
 
     private var authHeader: String? = null
+    private var insecureTrust: Boolean = false
 
     @OptIn(ExperimentalSerializationApi::class)
     private var client: HttpClient = createClient()
 
-    private fun createClient(): HttpClient = HttpClient(OkHttp) {
+    private fun createClient(insecureTrust: Boolean = false): HttpClient = HttpClient(OkHttp) {
         install(ContentNegotiation) { json(json) }
         install(HttpTimeout) {
             requestTimeoutMillis = 30_000
@@ -52,6 +58,21 @@ class OConnectorApiClient @Inject constructor(
         defaultRequest {
             contentType(ContentType.Application.Json)
             authHeader?.let { header(HttpHeaders.Authorization, it) }
+        }
+        engine {
+            if (insecureTrust) {
+                val trustManager = object : X509TrustManager {
+                    override fun checkClientTrusted(chain: Array<X509Certificate>, authType: String) {}
+                    override fun checkServerTrusted(chain: Array<X509Certificate>, authType: String) {}
+                    override fun getAcceptedIssuers(): Array<X509Certificate> = arrayOf()
+                }
+                val sslContext = SSLContext.getInstance("TLS")
+                sslContext.init(null, arrayOf<TrustManager>(trustManager), java.security.SecureRandom())
+                config {
+                    sslSocketFactory(sslContext.socketFactory, trustManager)
+                    hostnameVerifier { _, _ -> true }
+                }
+            }
         }
     }
 
@@ -65,8 +86,9 @@ class OConnectorApiClient @Inject constructor(
      * Configure (or reconfigure) the client with connection parameters.
      * Called by the repository when a new connection is established.
      */
-    fun configure(baseUrl: String, username: String = "", password: String = "") {
+    fun configure(baseUrl: String, username: String = "", password: String = "", insecureTrust: Boolean = false) {
         close()
+        this.insecureTrust = insecureTrust
         authHeader = if (password.isNotEmpty()) {
             "Basic " + Base64.encodeToString(
                 "${username.ifEmpty { "opencode" }}:$password".toByteArray(),
@@ -85,8 +107,27 @@ class OConnectorApiClient @Inject constructor(
                 contentType(ContentType.Application.Json)
                 authHeader?.let { header(HttpHeaders.Authorization, it) }
             }
+            engine {
+                if (insecureTrust) {
+                    val trustManager = object : X509TrustManager {
+                        override fun checkClientTrusted(chain: Array<X509Certificate>, authType: String) {}
+                        override fun checkServerTrusted(chain: Array<X509Certificate>, authType: String) {}
+                        override fun getAcceptedIssuers(): Array<X509Certificate> = arrayOf()
+                    }
+                    val sslContext = SSLContext.getInstance("TLS")
+                    sslContext.init(null, arrayOf<TrustManager>(trustManager), java.security.SecureRandom())
+                    config {
+                        sslSocketFactory(sslContext.socketFactory, trustManager)
+                        hostnameVerifier { _, _ -> true }
+                    }
+                }
+            }
         }
     }
+
+    /** Encode directory path for HTTP header (RFC 7230: headers are ASCII-only). */
+    private fun encDir(path: String): String =
+        URLEncoder.encode(path, "UTF-8")
 
     // ─── Sessions ──────────────────────────────────────────────────────
 
@@ -96,7 +137,7 @@ class OConnectorApiClient @Inject constructor(
             parameter("list", "")
             directory?.let {
                 parameter("directory", it)
-                header("x-opencode-directory", it)
+                header("x-opencode-directory", encDir(it))
             }
             scope?.let { parameter("scope", it) }
         }.body<List<SessionInfo>>()
@@ -110,7 +151,7 @@ class OConnectorApiClient @Inject constructor(
             setBody("{}")
             directory?.let {
                 parameter("directory", it)
-                header("x-opencode-directory", it)
+                header("x-opencode-directory", encDir(it))
             }
         }.body<CreateSessionResponse>()
 
@@ -119,7 +160,7 @@ class OConnectorApiClient @Inject constructor(
         client.get("/session/$id") {
             directory?.let {
                 parameter("directory", it)
-                header("x-opencode-directory", it)
+                header("x-opencode-directory", encDir(it))
             }
         }.body<SessionInfo>()
 
@@ -128,7 +169,7 @@ class OConnectorApiClient @Inject constructor(
         client.delete("/session/$id") {
             directory?.let {
                 parameter("directory", it)
-                header("x-opencode-directory", it)
+                header("x-opencode-directory", encDir(it))
             }
         }
     }
@@ -139,7 +180,7 @@ class OConnectorApiClient @Inject constructor(
             setBody("{}")
             directory?.let {
                 parameter("directory", it)
-                header("x-opencode-directory", it)
+                header("x-opencode-directory", encDir(it))
             }
         }.body<CreateSessionResponse>()
 
@@ -148,7 +189,7 @@ class OConnectorApiClient @Inject constructor(
         client.post("/session/$id/abort") {
             directory?.let {
                 parameter("directory", it)
-                header("x-opencode-directory", it)
+                header("x-opencode-directory", encDir(it))
             }
         }
     }
@@ -170,7 +211,7 @@ class OConnectorApiClient @Inject constructor(
             parameter("limit", MAX_MESSAGES)
             directory?.let {
                 parameter("directory", it)
-                header("x-opencode-directory", it)
+                header("x-opencode-directory", encDir(it))
             }
         }.body<List<MessageInfo>>()
 
@@ -193,7 +234,7 @@ class OConnectorApiClient @Inject constructor(
             setBody(SendMessageRequest(parts = listOf(SendMessagePart(text = text)), agent = agent))
             directory?.let {
                 parameter("directory", it)
-                header("x-opencode-directory", it)
+                header("x-opencode-directory", encDir(it))
             }
         }
     }
@@ -205,7 +246,7 @@ class OConnectorApiClient @Inject constructor(
         client.get("/session/$id/todo") {
             directory?.let {
                 parameter("directory", it)
-                header("x-opencode-directory", it)
+                header("x-opencode-directory", encDir(it))
             }
         }.body<List<TodoItem>>()
 

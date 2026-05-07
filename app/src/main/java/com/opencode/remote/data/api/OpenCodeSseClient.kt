@@ -18,6 +18,10 @@ import kotlinx.coroutines.isActive
 import kotlinx.serialization.json.Json
 import java.io.IOException
 import javax.inject.Inject
+import javax.net.ssl.SSLContext
+import javax.net.ssl.X509TrustManager
+import java.security.cert.X509Certificate
+import javax.net.ssl.TrustManager
 
 /**
  * SSE client for OpenCode server v1.14.x real-time event streaming.
@@ -38,12 +42,28 @@ class OConnectorSseClient @Inject constructor(
     private var baseUrl: String = ""
     private var authHeader: String? = null
     private var autoReconnect: Boolean = true
+    private var insecureTrust: Boolean = false
     private var sseClient: HttpClient = createSseClient()
 
-    private fun createSseClient(): HttpClient = HttpClient(OkHttp) {
+    private fun createSseClient(insecureTrust: Boolean = false): HttpClient = HttpClient(OkHttp) {
         install(HttpTimeout) {
             requestTimeoutMillis = Long.MAX_VALUE // SSE is long-lived
             socketTimeoutMillis = Long.MAX_VALUE
+        }
+        engine {
+            if (insecureTrust) {
+                val trustManager = object : X509TrustManager {
+                    override fun checkClientTrusted(chain: Array<X509Certificate>, authType: String) {}
+                    override fun checkServerTrusted(chain: Array<X509Certificate>, authType: String) {}
+                    override fun getAcceptedIssuers(): Array<X509Certificate> = arrayOf()
+                }
+                val sslContext = SSLContext.getInstance("TLS")
+                sslContext.init(null, arrayOf<TrustManager>(trustManager), java.security.SecureRandom())
+                config {
+                    sslSocketFactory(sslContext.socketFactory, trustManager)
+                    hostnameVerifier { _, _ -> true }
+                }
+            }
         }
     }
 
@@ -58,17 +78,18 @@ class OConnectorSseClient @Inject constructor(
      * Configure (or reconfigure) the SSE client with connection parameters.
      * Called by the repository when a new connection is established.
      */
-    fun configure(baseUrl: String, username: String = "", password: String = "", autoReconnect: Boolean = true) {
+    fun configure(baseUrl: String, username: String = "", password: String = "", autoReconnect: Boolean = true, insecureTrust: Boolean = false) {
         close()
         this.baseUrl = baseUrl
         this.autoReconnect = autoReconnect
+        this.insecureTrust = insecureTrust
         this.authHeader = if (password.isNotEmpty()) {
             "Basic " + Base64.encodeToString(
                 "${username.ifEmpty { "opencode" }}:$password".toByteArray(),
                 Base64.NO_WRAP
             )
         } else null
-        sseClient = createSseClient()
+        sseClient = createSseClient(insecureTrust)
     }
 
     /**
@@ -142,7 +163,7 @@ class OConnectorSseClient @Inject constructor(
 
             // Close old client and create new one to prevent resource leak
             try { sseClient.close() } catch (_: Exception) {}
-            sseClient = createSseClient()
+            sseClient = createSseClient(insecureTrust)
 
             val delayMs = minOf(INITIAL_DELAY_MS * (1L shl (retryCount - 1)), MAX_DELAY_MS)
             Log.w(TAG, "SSE reconnecting in ${delayMs}ms (attempt $retryCount/$MAX_RETRIES)")

@@ -24,6 +24,8 @@ data class AppStrings(
     val usernamePlaceholder: String,
     val passwordLabel: String,
     val passwordPlaceholder: String,
+    val useTlsLabel: String,
+    val insecureTrustLabel: String,
     val connectButton: String,
     val connecting: String,
     val tipsTitle: String,
@@ -148,6 +150,8 @@ val enStrings = AppStrings(
     usernamePlaceholder = "Optional (default: opencode)",
     passwordLabel = "Password",
     passwordPlaceholder = "Optional",
+    useTlsLabel = "Use HTTPS (TLS)",
+    insecureTrustLabel = "Allow untrusted certificates",
     connectButton = "Connect",
     connecting = "Connecting...",
     tipsTitle = "Quick Tips",
@@ -240,7 +244,7 @@ val enStrings = AppStrings(
     helpSecBullet2 = "Use Tailscale / ZeroTier for remote access",
     helpSecBullet3 = "Never expose the port to the public internet",
     helpSecBullet4 = "Do not use on public WiFi",
-    helpVersion = "OConnector v1.1.0",
+    helpVersion = "OConnector v1.1.1",
 
     // Error messages
     errEnterIp = "Please enter server IP address",
@@ -272,6 +276,8 @@ val zhStrings = AppStrings(
     usernamePlaceholder = "可选（默认: opencode）",
     passwordLabel = "密码",
     passwordPlaceholder = "可选",
+    useTlsLabel = "使用 HTTPS (TLS)",
+    insecureTrustLabel = "允许不受信任的证书",
     connectButton = "连接服务器",
     connecting = "连接中...",
     tipsTitle = "\uD83D\uDCA1 使用提示",
@@ -364,7 +370,7 @@ val zhStrings = AppStrings(
     helpSecBullet2 = "远程访问请使用 Tailscale / ZeroTier 加密通道",
     helpSecBullet3 = "不要将端口暴露到公网",
     helpSecBullet4 = "不要在公共 WiFi 下使用",
-    helpVersion = "OConnector v1.1.0",
+    helpVersion = "OConnector v1.1.1",
 
     // Error messages
     errEnterIp = "请输入服务器 IP 地址",

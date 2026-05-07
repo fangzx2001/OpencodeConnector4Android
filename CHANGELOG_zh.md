@@ -2,6 +2,17 @@
 
 OConnector 的所有重要变更都会记录在此文件中。
 
+## [1.1.1] - 2026-05-07
+
+### 新增
+
+- **HTTPS (TLS) 支持** — 连接页面新增"使用 HTTPS (TLS)"开关。通过 HTTPS 反向代理（如 Lucky、Nginx、Caddy）连接时请开启此选项，APP 将使用 `https://` 替代 `http://` 进行所有 API 和 SSE 请求。
+- **自签名证书支持** — 开启 TLS 后会显示"允许不受信任的证书"开关。连接使用自签名证书的服务器（家庭内网常见）时请开启。两项设置均会保存，重启 APP 后自动恢复。
+
+### 修复
+
+- **中文/非 ASCII 路径编码** — 从包含中文字符的目录加载会话时（如 `C:\Users\...\论文阅读`）会报错 `Unexpected char 0x8bba in x-opencode-directory`。现在 `x-opencode-directory` HTTP 头已正确进行 URL 编码，符合 RFC 7230（仅允许 ASCII 字符）。
+
 ## [1.1.0] - 2026-05-05
 
 ### 新增

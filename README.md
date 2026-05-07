@@ -11,6 +11,7 @@ An Android client for the [OpenCode](https://opencode.ai) AI coding assistant. C
 ## Features
 
 - **Multi-project discovery** — automatically finds and lists sessions from all projects, regardless of which directory the server was started from
+- **HTTPS (TLS) support** — connect through HTTPS reverse proxies (Lucky, Nginx, Caddy, etc.) with optional self-signed certificate trust
 - Real-time AI chat with SSE streaming
 - Tool call rendering (thinking bubbles, tool summaries)
 - Todo task panel overlay
@@ -20,6 +21,7 @@ An Android client for the [OpenCode](https://opencode.ai) AI coding assistant. C
 - EN/ZH bilingual toggle (in-app)
 - Password encrypted storage (EncryptedSharedPreferences)
 - SSE auto-reconnection with exponential backoff
+- **Chinese/non-ASCII path support** — works with project directories containing Chinese, Japanese, Korean, or other Unicode characters
 
 ## Download & Install
 
@@ -86,6 +88,17 @@ You can start the server from any directory — OConnector will discover all pro
 2. The session list shows all projects and sessions across your PC
 3. Tap a project to see its sessions, tap a session to enter chat
 4. Send messages, switch agents, track todos
+
+### Connecting via HTTPS Reverse Proxy
+
+If you use a reverse proxy (Lucky, Nginx, Caddy, etc.) to expose OpenCode with HTTPS:
+
+1. Enter the proxy domain (e.g. `opencode.example.com`) and port
+2. Enable **"Use HTTPS (TLS)"** toggle
+3. If your proxy uses a self-signed certificate, also enable **"Allow untrusted certificates"**
+4. Tap **Connect**
+
+> **Tip**: For LAN setups without a domain, you can also use Tailscale HTTPS or configure local DNS.
 
 ## Tech Stack
 

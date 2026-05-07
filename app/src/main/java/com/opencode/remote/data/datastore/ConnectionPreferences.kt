@@ -26,6 +26,7 @@ data class ConnectionConfig(
     val username: String = "",
     val password: String = "",
     val useTls: Boolean = false,
+    val insecureTrust: Boolean = false,
     val autoReconnect: Boolean = true,
 )
 
@@ -43,6 +44,7 @@ class ConnectionPreferences @Inject constructor(
         val USERNAME = stringPreferencesKey("connection_username")
         val PASSWORD = stringPreferencesKey("connection_password")
         val USE_TLS = booleanPreferencesKey("connection_use_tls")
+        val INSECURE_TRUST = booleanPreferencesKey("connection_insecure_trust")
         val AUTO_RECONNECT = booleanPreferencesKey("connection_auto_reconnect")
         val LANGUAGE = stringPreferencesKey("app_language")
         val DARK_MODE = booleanPreferencesKey("app_dark_mode")
@@ -110,6 +112,7 @@ class ConnectionPreferences @Inject constructor(
                 username = prefs[Keys.USERNAME] ?: "",
                 password = password,
                 useTls = prefs[Keys.USE_TLS] ?: false,
+                insecureTrust = prefs[Keys.INSECURE_TRUST] ?: false,
                 autoReconnect = prefs[Keys.AUTO_RECONNECT] ?: true,
             )
         }
@@ -180,6 +183,7 @@ class ConnectionPreferences @Inject constructor(
                 it[Keys.USERNAME] = config.username
                 it.remove(Keys.PASSWORD) // Ensure plaintext password is cleared
                 it[Keys.USE_TLS] = config.useTls
+                it[Keys.INSECURE_TRUST] = config.insecureTrust
                 it[Keys.AUTO_RECONNECT] = config.autoReconnect
             }
         } catch (e: Exception) {

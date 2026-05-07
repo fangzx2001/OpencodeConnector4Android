@@ -192,6 +192,40 @@ fun ConnectionScreen(
                 enabled = !uiState.isConnecting,
             )
 
+            Spacer(modifier = Modifier.height(12.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+                Text(s.useTlsLabel, style = MaterialTheme.typography.bodyLarge)
+                Switch(
+                    checked = uiState.useTls,
+                    onCheckedChange = viewModel::onUseTlsChange,
+                    enabled = !uiState.isConnecting,
+                )
+            }
+
+            if (uiState.useTls) {
+                Spacer(modifier = Modifier.height(8.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                ) {
+                    Text(
+                        s.insecureTrustLabel,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Switch(
+                        checked = uiState.insecureTrust,
+                        onCheckedChange = viewModel::onInsecureTrustChange,
+                        enabled = !uiState.isConnecting,
+                    )
+                }
+            }
+
             uiState.error?.let { errorMsg ->
                 Spacer(modifier = Modifier.height(12.dp))
                 Card(

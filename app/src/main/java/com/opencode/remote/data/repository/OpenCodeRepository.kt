@@ -101,8 +101,8 @@ class OConnectorRepositoryImpl @Inject constructor(
         val scheme = if (config.useTls) "https" else "http"
         val baseUrl = "$scheme://${config.host}:${config.port}"
 
-        apiClient.configure(baseUrl, config.username, config.password)
-        sseClient.configure(baseUrl, config.username, config.password, config.autoReconnect)
+        apiClient.configure(baseUrl, config.username, config.password, config.insecureTrust)
+        sseClient.configure(baseUrl, config.username, config.password, config.autoReconnect, config.insecureTrust)
         connected = true
     }
 

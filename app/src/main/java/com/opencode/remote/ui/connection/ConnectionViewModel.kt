@@ -18,6 +18,8 @@ data class ConnectionUiState(
     val port: String = "4096",
     val username: String = "",
     val password: String = "",
+    val useTls: Boolean = false,
+    val insecureTrust: Boolean = false,
     val isConnecting: Boolean = false,
     val isConnected: Boolean = false,
     val error: String? = null,
@@ -48,6 +50,8 @@ class ConnectionViewModel @Inject constructor(
                             port = config.port.toString(),
                             username = config.username,
                             password = config.password,
+                            useTls = config.useTls,
+                            insecureTrust = config.insecureTrust,
                         )
                     }
                 }
@@ -71,6 +75,14 @@ class ConnectionViewModel @Inject constructor(
 
     fun onPasswordChange(password: String) {
         _uiState.update { it.copy(password = password, error = null) }
+    }
+
+    fun onUseTlsChange(useTls: Boolean) {
+        _uiState.update { it.copy(useTls = useTls) }
+    }
+
+    fun onInsecureTrustChange(insecureTrust: Boolean) {
+        _uiState.update { it.copy(insecureTrust = insecureTrust) }
     }
 
     fun connect() {
@@ -97,6 +109,8 @@ class ConnectionViewModel @Inject constructor(
                     port = port,
                     username = state.username.trim(),
                     password = state.password,
+                    useTls = state.useTls,
+                    insecureTrust = state.insecureTrust,
                 )
 
                 // 在 IO 线程创建 HttpClient（避免在主线程加载引擎/依赖）
