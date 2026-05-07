@@ -1,10 +1,13 @@
 package com.opencode.remote.data.repository
 
+import android.content.Context
 import com.opencode.remote.data.api.OConnectorApiClient
 import com.opencode.remote.data.api.OConnectorSseClient
 import com.opencode.remote.data.api.dto.*
 import com.opencode.remote.data.datastore.ConnectionConfig
+import com.opencode.remote.service.SseForegroundService
 import com.opencode.remote.ui.chat.ResponseSegment
+import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.Flow
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -85,6 +88,7 @@ interface OConnectorRepository {
 class OConnectorRepositoryImpl @Inject constructor(
     private val apiClient: OConnectorApiClient,
     private val sseClient: OConnectorSseClient,
+    @ApplicationContext private val context: Context,
 ) : OConnectorRepository {
 
     private var connected = false
@@ -104,6 +108,7 @@ class OConnectorRepositoryImpl @Inject constructor(
         apiClient.configure(baseUrl, config.username, config.password, config.insecureTrust)
         sseClient.configure(baseUrl, config.username, config.password, config.autoReconnect, config.insecureTrust)
         connected = true
+        SseForegroundService.start(context)
     }
 
     /**
@@ -112,6 +117,7 @@ class OConnectorRepositoryImpl @Inject constructor(
     override fun disconnect() {
         apiClient.close()
         sseClient.close()
+        SseForegroundService.stop(context)
         connected = false
         cachedAgents = null
     }

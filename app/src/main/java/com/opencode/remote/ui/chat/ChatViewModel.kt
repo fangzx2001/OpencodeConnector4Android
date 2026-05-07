@@ -5,6 +5,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.opencode.remote.data.api.dto.*
 import com.opencode.remote.data.repository.OConnectorRepository
+import com.opencode.remote.data.sse.SseEventBus
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
@@ -81,6 +82,7 @@ data class ChatUiState(
 @HiltViewModel
 class ChatViewModel @Inject constructor(
     private val repository: OConnectorRepository,
+    private val sseEventBus: SseEventBus,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(ChatUiState())
@@ -264,7 +266,7 @@ class ChatViewModel @Inject constructor(
         sseJob?.cancel()
         sseJob = viewModelScope.launch {
             try {
-                repository.subscribeToEvents().collect { event ->
+                sseEventBus.events.collect { event ->
                     handleEvent(event)
                 }
             } catch (e: Exception) {
