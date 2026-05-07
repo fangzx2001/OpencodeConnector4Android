@@ -12,6 +12,8 @@ An Android client for the [OpenCode](https://opencode.ai) AI coding assistant. C
 
 - **Multi-project discovery** — automatically finds and lists sessions from all projects, regardless of which directory the server was started from
 - **HTTPS (TLS) support** — connect through HTTPS reverse proxies (Lucky, Nginx, Caddy, etc.) with optional self-signed certificate trust
+- **In-app update check** — automatically checks GitHub for new versions on startup, one-tap APK download & install
+- **Background SSE stability** — foreground service keeps the connection alive when the app is in the background
 - Real-time AI chat with SSE streaming
 - Tool call rendering (thinking bubbles, tool summaries)
 - Todo task panel overlay
@@ -27,8 +29,8 @@ An Android client for the [OpenCode](https://opencode.ai) AI coding assistant. C
 
 ### Download APK
 
-1. Go to [release/app-release.apk](release/app-release.apk)
-2. Click **Download**
+1. Go to [GitHub Releases](https://github.com/fangzx2001/OpencodeConnector4Android/releases/latest)
+2. Download `app-release.apk` from the latest release
 3. Open the file on your phone, allow "Install from unknown sources"
 4. Open OConnector and connect to your PC
 
@@ -118,11 +120,16 @@ app/src/main/java/com/opencode/remote/
 │   ├── api/          # REST + SSE clients
 │   ├── dto/          # Data models
 │   ├── datastore/    # Preferences
-│   └── repository/   # Repository pattern
+│   ├── download/     # DownloadManager + FileProvider install
+│   ├── github/       # GitHub Releases API + version compare
+│   ├── repository/   # Repository pattern
+│   └── sse/          # SSE event bus
+├── service/          # Foreground service
 ├── ui/
 │   ├── connection/   # Connect screen
 │   ├── sessions/     # Project + session list
 │   ├── chat/         # Chat + streaming + tools
+│   ├── help/         # Help screen
 │   ├── theme/        # Material3 theme
 │   └── strings/      # i18n
 └── AppNavigation.kt  # Nav graph

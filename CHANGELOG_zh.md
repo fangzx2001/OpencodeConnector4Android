@@ -2,6 +2,26 @@
 
 OConnector 的所有重要变更都会记录在此文件中。
 
+## [1.1.2] - 2026-05-07
+
+### 新增
+
+- **后台 SSE 保活** — 前台 Service（`dataSync` 类型）在 App 进入后台时保持 SSE 连接不断开。持久通知「OConnector 正在运行」满足 Android 14+ 前台服务要求。
+- **应用内更新检测** — 打开连接页面时自动检查 GitHub Releases 是否有新版本。有更新时，语言按钮旁边出现下载图标 (⬇)。
+- **更新对话框** — 点击下载图标可查看更新日志和下载按钮。APK 通过 DownloadManager 下载，系统安装器完成安装。
+- **帮助页面新增「检查更新」说明**（中英双语）。
+
+### 修复
+
+- **API 26-28 兼容性** — `ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC` 需要 API 29+。已添加 SDK 版本检查，旧设备自动回退到 2 参数 `startForeground()`。
+- **更新 UI 国际化** — UpdateDialog 改用 `AppLocale` 本地化字符串，不再硬编码英文。
+
+### 变更
+
+- 帮助页面版本号改用 `BuildConfig.VERSION_NAME`，不再硬编码。
+- APK 不再追踪在 git 仓库中 — 改为通过 GitHub Releases 分发。
+- `release/` 目录已加入 `.gitignore`。
+
 ## [1.1.1] - 2026-05-07
 
 ### 新增

@@ -2,6 +2,26 @@
 
 All notable changes to OConnector will be documented in this file.
 
+## [1.1.2] - 2026-05-07
+
+### Added
+
+- **Background SSE stability** — foreground service with `dataSync` type keeps the SSE connection alive when the app is in the background. A persistent notification ("OConnector is running") is displayed to comply with Android 14+ requirements.
+- **In-app update check** — the app automatically checks GitHub Releases for new versions when you open the connection page. If an update is available, a download icon (⬇) appears next to the language button.
+- **Update dialog** — tapping the download icon shows the changelog and a download button. The APK is downloaded via DownloadManager and installed through the system installer.
+- **Help page: "Check for Updates"** section added (EN/ZH).
+
+### Fixed
+
+- **API 26-28 compatibility** — `ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC` requires API 29+. Added SDK version check to fall back to the 2-param `startForeground()` on older devices.
+- **i18n for update UI** — UpdateDialog now uses localized strings from `AppLocale` instead of hardcoded English text.
+
+### Changed
+
+- Help page version number now uses `BuildConfig.VERSION_NAME` instead of a hardcoded string.
+- APK no longer tracked in the git repository — distributed via GitHub Releases instead.
+- `release/` directory added to `.gitignore`.
+
 ## [1.1.1] - 2026-05-07
 
 ### Added

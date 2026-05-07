@@ -12,6 +12,8 @@
 
 - **多项目自动发现** — 自动发现并展示所有项目的会话，无需关心服务器从哪个目录启动
 - **HTTPS (TLS) 支持** — 通过 HTTPS 反向代理（Lucky、Nginx、Caddy 等）连接，支持自签名证书
+- **应用内更新检测** — 启动时自动检查 GitHub 是否有新版本，一键下载安装 APK
+- **后台 SSE 保活** — 前台 Service 在 App 后台时保持连接不断开
 - 实时 AI 聊天，SSE 流式输出
 - 工具调用渲染（思考气泡、工具摘要）
 - Todo 任务面板浮层
@@ -27,8 +29,8 @@
 
 ### 下载 APK
 
-1. 前往 [release/app-release.apk](release/app-release.apk)
-2. 点击 **Download** 下载
+1. 前往 [GitHub Releases](https://github.com/fangzx2001/OpencodeConnector4Android/releases/latest)
+2. 下载最新版本中的 `app-release.apk`
 3. 在手机上打开下载的文件，允许「安装未知来源应用」
 4. 安装完成后打开 OConnector，连接你的 PC
 
@@ -118,11 +120,16 @@ app/src/main/java/com/opencode/remote/
 │   ├── api/          # REST + SSE 客户端
 │   ├── dto/          # 数据模型
 │   ├── datastore/    # 偏好存储
-│   └── repository/   # 仓库模式
+│   ├── download/     # DownloadManager + FileProvider 安装
+│   ├── github/       # GitHub Releases API + 版本比较
+│   ├── repository/   # 仓库模式
+│   └── sse/          # SSE 事件总线
+├── service/          # 前台 Service
 ├── ui/
 │   ├── connection/   # 连接页
 │   ├── sessions/     # 项目 + 会话列表
 │   ├── chat/         # 聊天 + 流式 + 工具调用
+│   ├── help/         # 帮助页面
 │   ├── theme/        # Material3 主题
 │   └── strings/      # 国际化
 └── AppNavigation.kt  # 导航图
