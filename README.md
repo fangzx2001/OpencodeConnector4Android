@@ -11,6 +11,7 @@ An Android client for the [OpenCode](https://opencode.ai) AI coding assistant. C
 ## Features
 
 - **Multi-project discovery** — automatically finds and lists sessions from all projects, regardless of which directory the server was started from
+- **Optional child-session filtering** — hide sub-sessions from project lists when you only want root conversations
 - **HTTPS (TLS) support** — connect through HTTPS reverse proxies (Lucky, Nginx, Caddy, etc.) with optional self-signed certificate trust
 - **In-app update check** — automatically checks GitHub for new versions on startup, one-tap APK download & install
 - **Background SSE stability** — foreground service keeps the connection alive when the app is in the background
@@ -89,7 +90,8 @@ You can start the server from any directory — OConnector will discover all pro
 1. Open OConnector → enter PC IP and port → tap **Connect**
 2. The session list shows all projects and sessions across your PC
 3. Tap a project to see its sessions, tap a session to enter chat
-4. Send messages, switch agents, track todos
+4. Tap the eye icon in the top bar to hide or show child sessions
+5. Send messages, switch agents, track todos
 
 ### Connecting via HTTPS Reverse Proxy
 
