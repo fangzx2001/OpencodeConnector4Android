@@ -56,6 +56,12 @@ fun SessionsScreen(
                     }
                 },
                 actions = {
+                    IconButton(onClick = { viewModel.toggleHideChildSessions() }) {
+                        Icon(
+                            imageVector = if (uiState.hideChildSessions) Icons.Default.VisibilityOff else Icons.Default.Visibility,
+                            contentDescription = if (uiState.hideChildSessions) s.showChildSessions else s.hideChildSessions,
+                        )
+                    }
                     IconButton(onClick = { viewModel.toggleDarkMode() }) {
                         Icon(
                             if (AppLocale.darkMode) Icons.Default.LightMode else Icons.Default.DarkMode,
@@ -262,6 +268,12 @@ fun ProjectSessionsScreen(
                     }
                 },
                 actions = {
+                    IconButton(onClick = { viewModel.toggleHideChildSessions() }) {
+                        Icon(
+                            imageVector = if (uiState.hideChildSessions) Icons.Default.VisibilityOff else Icons.Default.Visibility,
+                            contentDescription = if (uiState.hideChildSessions) s.showChildSessions else s.hideChildSessions,
+                        )
+                    }
                     IconButton(onClick = { viewModel.loadSessions() }) {
                         Icon(Icons.Default.Refresh, contentDescription = s.refresh)
                     }
@@ -441,4 +453,3 @@ private fun SessionCard(
         }
     }
 }
-
