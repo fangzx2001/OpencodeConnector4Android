@@ -46,6 +46,8 @@ data class AppStrings(
     val delete: String,
     val moreActions: String,
     val close: String,
+    val hideChildSessions: String,
+    val showChildSessions: String,
 
     // Chat screen
     val sendFirstMsg: String,
@@ -194,6 +196,8 @@ val enStrings = AppStrings(
     delete = "Delete",
     moreActions = "More",
     close = "Close",
+    hideChildSessions = "Hide child sessions",
+    showChildSessions = "Show child sessions",
 
     // Chat
     sendFirstMsg = "Send a message to start",
@@ -338,6 +342,8 @@ val zhStrings = AppStrings(
     delete = "删除",
     moreActions = "更多操作",
     close = "关闭",
+    hideChildSessions = "隐藏子会话",
+    showChildSessions = "显示子会话",
 
     // Chat
     sendFirstMsg = "发送第一条消息开始对话",

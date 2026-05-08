@@ -19,6 +19,7 @@ data class SessionsUiState(
     val error: String? = null,
     /** project.worktree or project.id */
     val projectName: String? = null,
+    val hideChildSessions: Boolean = false,
 )
 
 @HiltViewModel
@@ -26,6 +27,8 @@ class SessionsViewModel @Inject constructor(
     private val repository: OConnectorRepository,
     private val prefs: ConnectionPreferences,
 ) : ViewModel() {
+
+    private var allSessions: List<SessionInfo> = emptyList()
 
     private val _uiState = MutableStateFlow(SessionsUiState())
     val uiState: StateFlow<SessionsUiState> = _uiState.asStateFlow()
@@ -41,12 +44,26 @@ class SessionsViewModel @Inject constructor(
         loadSessions()
         loadProjectName()
         observeDarkMode()
+        observeHideChildSessions()
     }
 
     private fun observeDarkMode() {
         viewModelScope.launch {
             prefs.darkMode.collect { enabled ->
                 AppLocale.darkMode = enabled
+            }
+        }
+    }
+
+    private fun observeHideChildSessions() {
+        viewModelScope.launch {
+            prefs.hideChildSessions.collect { enabled ->
+                _uiState.update {
+                    it.copy(
+                        hideChildSessions = enabled,
+                        sessions = filterVisibleSessions(allSessions, enabled),
+                    )
+                }
             }
         }
     }
@@ -59,6 +76,12 @@ class SessionsViewModel @Inject constructor(
         }
     }
 
+    fun toggleHideChildSessions() {
+        viewModelScope.launch {
+            prefs.saveHideChildSessions(!_uiState.value.hideChildSessions)
+        }
+    }
+
     fun loadSessions() {
         viewModelScope.launch {
             // Only show spinner if there's no existing data (first load)
@@ -67,8 +90,13 @@ class SessionsViewModel @Inject constructor(
                 _uiState.update { it.copy(isLoading = true, error = null) }
             }
             try {
-                val sessions = repository.listAllSessions()
-                _uiState.update { it.copy(sessions = sessions, isLoading = false) }
+                allSessions = repository.listAllSessions()
+                _uiState.update {
+                    it.copy(
+                        sessions = filterVisibleSessions(allSessions, it.hideChildSessions),
+                        isLoading = false,
+                    )
+                }
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to load sessions", e)
                 val s = com.opencode.remote.ui.strings.AppLocale.strings

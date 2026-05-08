@@ -48,6 +48,7 @@ class ConnectionPreferences @Inject constructor(
         val AUTO_RECONNECT = booleanPreferencesKey("connection_auto_reconnect")
         val LANGUAGE = stringPreferencesKey("app_language")
         val DARK_MODE = booleanPreferencesKey("app_dark_mode")
+        val HIDE_CHILD_SESSIONS = booleanPreferencesKey("hide_child_sessions")
     }
 
     private val masterKey by lazy {
@@ -139,6 +140,15 @@ class ConnectionPreferences @Inject constructor(
             emit(false)
         }
 
+    val hideChildSessions: Flow<Boolean> = context.dataStore.data
+        .map { prefs ->
+            prefs[Keys.HIDE_CHILD_SESSIONS] ?: false
+        }
+        .catch { e ->
+            Log.e(TAG, "Failed to read hide child sessions", e)
+            emit(false)
+        }
+
     suspend fun saveLanguage(lang: String) {
         try {
             context.dataStore.edit { it[Keys.LANGUAGE] = lang }
@@ -152,6 +162,14 @@ class ConnectionPreferences @Inject constructor(
             context.dataStore.edit { it[Keys.DARK_MODE] = enabled }
         } catch (e: Exception) {
             Log.e(TAG, "Failed to save dark mode", e)
+        }
+    }
+
+    suspend fun saveHideChildSessions(enabled: Boolean) {
+        try {
+            context.dataStore.edit { it[Keys.HIDE_CHILD_SESSIONS] = enabled }
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to save hide child sessions", e)
         }
     }
 
