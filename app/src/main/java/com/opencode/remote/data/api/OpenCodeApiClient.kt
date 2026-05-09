@@ -335,6 +335,24 @@ class OConnectorApiClient @Inject constructor(
     suspend fun listAgents(): List<AgentInfo> =
         client.get("/agent").body<List<AgentInfo>>()
 
+    // ─── Files ──────────────────────────────────────────────────────────
+
+    /** GET /file?path=... → returns array of file/directory nodes */
+    suspend fun listFiles(path: String, directory: String? = null): List<FileNode> =
+        client.get("/file") {
+            parameter("path", path)
+            directory?.let {
+                parameter("directory", it)
+                header("x-opencode-directory", encDir(it))
+            }
+        }.body<List<FileNode>>()
+
+    // ─── Config / Providers ─────────────────────────────────────────────
+
+    /** GET /config/providers → returns provider list with models */
+    suspend fun listProviders(): ProviderList =
+        client.get("/config/providers").body<ProviderList>()
+
     fun close() {
         try { client.close() } catch (_: Exception) {}
     }

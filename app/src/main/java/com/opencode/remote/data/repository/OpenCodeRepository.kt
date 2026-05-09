@@ -66,6 +66,20 @@ interface OConnectorRepository {
     suspend fun listAgents(): List<AgentInfo>
     fun getCachedAgents(): List<AgentInfo>
 
+    // ─── Files ──────────────────────────────────────────────────────────
+
+    suspend fun listFiles(path: String, directory: String? = null): List<FileNode>
+
+    // ─── Config / Providers ─────────────────────────────────────────────
+
+    suspend fun listProviders(): ProviderList
+    fun getCachedModels(): List<ModelInfo>
+
+    // ─── Active Session (notification deep link) ─────────────────────
+
+    var activeSessionId: String?
+    var activeSessionDirectory: String?
+
     // ─── SSE Events ──────────────────────────────────────────────────
 
     fun subscribeToEvents(): Flow<ServerEvent>
@@ -93,6 +107,10 @@ class OConnectorRepositoryImpl @Inject constructor(
 
     private var connected = false
     private var cachedAgents: List<AgentInfo>? = null
+    private var cachedModels: List<ModelInfo>? = null
+
+    override var activeSessionId: String? = null
+    override var activeSessionDirectory: String? = null
 
     override val isConnected: Boolean
         get() = connected
@@ -120,6 +138,9 @@ class OConnectorRepositoryImpl @Inject constructor(
         SseForegroundService.stop(context)
         connected = false
         cachedAgents = null
+        cachedModels = null
+        activeSessionId = null
+        activeSessionDirectory = null
     }
 
     private fun requireClient(): OConnectorApiClient {
@@ -181,13 +202,29 @@ class OConnectorRepositoryImpl @Inject constructor(
     override suspend fun listAgents(): List<AgentInfo> {
         cachedAgents?.let { return it }
         val agents = requireClient().listAgents()
-            .filter { !it.hidden }
+            .filter { it.mode != "subagent" && !it.hidden }
         cachedAgents = agents
         return agents
     }
 
     /** Get cached agents (returns empty list if not loaded yet) */
     override fun getCachedAgents(): List<AgentInfo> = cachedAgents ?: emptyList()
+
+    // ─── Files ──────────────────────────────────────────────────────────
+
+    override suspend fun listFiles(path: String, directory: String?): List<FileNode> =
+        requireClient().listFiles(path, directory)
+
+    // ─── Config / Providers ─────────────────────────────────────────────
+
+    override suspend fun listProviders(): ProviderList {
+        cachedModels?.let { return ProviderList() }
+        val providers = requireClient().listProviders()
+        cachedModels = providers.providers.flatMap { it.models }
+        return providers
+    }
+
+    override fun getCachedModels(): List<ModelInfo> = cachedModels ?: emptyList()
 
     // ─── SSE Events ──────────────────────────────────────────────────
 
