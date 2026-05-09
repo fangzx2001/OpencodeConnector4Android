@@ -15,7 +15,14 @@ import io.ktor.client.plugins.contentnegotiation.*
 import io.ktor.client.request.*
 import io.ktor.http.*
 import io.ktor.serialization.kotlinx.json.*
+import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.decodeFromJsonElement
+import kotlinx.serialization.json.jsonPrimitive
 import javax.inject.Inject
 import java.net.URLEncoder
 import javax.net.ssl.SSLContext
@@ -31,11 +38,15 @@ import javax.net.ssl.TrustManager
  *   POST /session                   → CreateSessionResponse
  *   GET  /session/{id}              → SessionInfo
  *   DELETE /session/{id}            → 200 OK
+ *   PATCH /session/{id}             → SessionInfo
  *   POST /session/{id}/fork         → CreateSessionResponse
  *   POST /session/{id}/abort        → 200 OK
+ *   POST /session/{id}/share        → SessionInfo
+ *   DELETE /session/{id}/share      → SessionInfo
  *   GET  /session/{id}/message      → List<MessageInfo>
  *   POST /session/{id}/prompt_async → 204 No Content (async, AI output via SSE)
  *   GET  /session/{id}/todo         → List<TodoItem>
+ *   GET  /provider                  → ProvidersResponseDto
  *   GET  /project/current           → ProjectInfo
  */
 class OConnectorApiClient @Inject constructor(
@@ -174,6 +185,16 @@ class OConnectorApiClient @Inject constructor(
         }
     }
 
+    /** PATCH /session/{id} */
+    suspend fun updateSession(id: String, title: String, directory: String? = null): SessionInfo =
+        client.patch("/session/$id") {
+            setBody(UpdateSessionRequest(title = title))
+            directory?.let {
+                parameter("directory", it)
+                header("x-opencode-directory", encDir(it))
+            }
+        }.body<SessionInfo>()
+
     /** POST /session/{id}/fork with empty body */
     suspend fun forkSession(id: String, directory: String? = null): CreateSessionResponse =
         client.post("/session/$id/fork") {
@@ -193,6 +214,40 @@ class OConnectorApiClient @Inject constructor(
             }
         }
     }
+
+    /** POST /session/{id}/summarize */
+    suspend fun summarizeSession(
+        id: String,
+        providerID: String,
+        modelID: String,
+        directory: String? = null,
+    ) {
+        client.post("/session/$id/summarize") {
+            setBody(SummarizeSessionRequest(providerID = providerID, modelID = modelID))
+            directory?.let {
+                parameter("directory", it)
+                header("x-opencode-directory", encDir(it))
+            }
+        }
+    }
+
+    /** POST /session/{id}/share */
+    suspend fun shareSession(id: String, directory: String? = null): SessionInfo =
+        client.post("/session/$id/share") {
+            directory?.let {
+                parameter("directory", it)
+                header("x-opencode-directory", encDir(it))
+            }
+        }.body<SessionInfo>()
+
+    /** DELETE /session/{id}/share */
+    suspend fun unshareSession(id: String, directory: String? = null): SessionInfo =
+        client.delete("/session/$id/share") {
+            directory?.let {
+                parameter("directory", it)
+                header("x-opencode-directory", encDir(it))
+            }
+        }.body<SessionInfo>()
 
     // ─── Messages ──────────────────────────────────────────────────────
 
@@ -334,6 +389,64 @@ class OConnectorApiClient @Inject constructor(
     /** GET /agent → returns array of available agents */
     suspend fun listAgents(): List<AgentInfo> =
         client.get("/agent").body<List<AgentInfo>>()
+
+    /** GET /provider → returns providers and model limits */
+    suspend fun listProviders(): ProvidersResponseDto {
+        val raw = client.get("/provider").body<String>()
+        return parseProvidersResponse(raw)
+    }
+
+    private fun parseProvidersResponse(raw: String): ProvidersResponseDto {
+        val element = json.decodeFromString<JsonElement>(raw)
+        return when (element) {
+            is JsonArray -> ProvidersResponseDto(providers = element.mapNotNull(::parseProviderInfo))
+            is JsonObject -> ProvidersResponseDto(
+                all = parseProviderList(element["all"]),
+                providers = parseProviderList(element["providers"]).ifEmpty { parseProviderList(element["items"]) },
+                default = parseStringMap(element["default"]),
+                connected = parseStringList(element["connected"]),
+            )
+            else -> ProvidersResponseDto()
+        }
+    }
+
+    private fun parseProviderList(element: JsonElement?): List<ProviderInfo> =
+        (element as? JsonArray)?.mapNotNull(::parseProviderInfo).orEmpty()
+
+    private fun parseProviderInfo(element: JsonElement): ProviderInfo? {
+        val obj = element as? JsonObject ?: return null
+        val id = obj["id"]?.jsonPrimitive?.contentOrNull ?: return null
+        val name = obj["name"]?.jsonPrimitive?.contentOrNull
+        return ProviderInfo(
+            id = id,
+            name = name,
+            models = parseProviderModels(obj["models"]),
+        )
+    }
+
+    private fun parseProviderModels(element: JsonElement?): Map<String, ProviderModelInfo> = when (element) {
+        is JsonObject -> element.mapNotNull { (key, value) ->
+            runCatching { key to json.decodeFromJsonElement<ProviderModelInfo>(value) }.getOrNull()
+        }.toMap()
+        is JsonArray -> element.mapIndexedNotNull { index, value ->
+            runCatching {
+                val model = json.decodeFromJsonElement<ProviderModelInfo>(value)
+                val key = model.id ?: model.name ?: index.toString()
+                key to model
+            }.getOrNull()
+        }.toMap()
+        else -> emptyMap()
+    }
+
+    private fun parseStringMap(element: JsonElement?): Map<String, String> {
+        val obj = element as? JsonObject ?: return emptyMap()
+        return obj.mapNotNull { (key, value) ->
+            value.jsonPrimitive.contentOrNull?.let { key to it }
+        }.toMap()
+    }
+
+    private fun parseStringList(element: JsonElement?): List<String> =
+        (element as? JsonArray)?.mapNotNull { it.jsonPrimitive.contentOrNull }.orEmpty()
 
     fun close() {
         try { client.close() } catch (_: Exception) {}

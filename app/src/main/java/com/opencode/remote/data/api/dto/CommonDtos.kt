@@ -40,3 +40,34 @@ data class AgentInfo(
     val description: String? = null,
     val hidden: Boolean = false,
 )
+
+@Serializable
+data class ProvidersResponseDto(
+    val all: List<ProviderInfo> = emptyList(),
+    val providers: List<ProviderInfo> = emptyList(),
+    val default: Map<String, String> = emptyMap(),
+    val connected: List<String> = emptyList(),
+) {
+    val items: List<ProviderInfo>
+        get() = if (all.isNotEmpty()) all else providers
+}
+
+@Serializable
+data class ProviderInfo(
+    val id: String,
+    val name: String? = null,
+    val models: Map<String, ProviderModelInfo> = emptyMap(),
+)
+
+@Serializable
+data class ProviderModelInfo(
+    val id: String? = null,
+    val name: String? = null,
+    val limit: ModelLimitInfo? = null,
+)
+
+@Serializable
+data class ModelLimitInfo(
+    val context: Int? = null,
+    val output: Int? = null,
+)
