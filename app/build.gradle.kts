@@ -11,7 +11,7 @@ android {
     compileSdk = 34
 
     defaultConfig {
-        applicationId = "com.opencode.remote"
+        applicationId = "com.opencode.remote.alpha"
         minSdk = 26
         targetSdk = 34
         versionCode = 4
