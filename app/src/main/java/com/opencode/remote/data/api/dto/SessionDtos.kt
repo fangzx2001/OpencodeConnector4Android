@@ -118,6 +118,13 @@ data class MessageTokens(
     val input: Int? = null,
     val output: Int? = null,
     val reasoning: Int? = null,
+    val cache: CacheTokens? = null,
+)
+
+@Serializable
+data class CacheTokens(
+    val read: Int? = null,
+    val write: Int? = null,
 )
 
 /**

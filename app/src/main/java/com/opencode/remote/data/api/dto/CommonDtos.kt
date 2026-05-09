@@ -39,4 +39,44 @@ data class AgentInfo(
     val mode: String? = null,
     val description: String? = null,
     val hidden: Boolean = false,
+    val model: AgentModel? = null,
+)
+
+@Serializable
+data class AgentModel(
+    @SerialName("modelID")
+    val modelID: String? = null,
+    @SerialName("providerID")
+    val providerID: String? = null,
+)
+
+/**
+ * 实际 API: GET /file?path=... 返回数组
+ * 字段: name, path, absolute, type ("file"|"directory"), ignored
+ */
+@Serializable
+data class FileNode(
+    val name: String,
+    val path: String,
+    val absolute: String,
+    val type: String,
+    val ignored: Boolean = false,
+)
+
+@Serializable
+data class ProviderList(
+    val providers: List<ProviderInfo> = emptyList(),
+)
+
+@Serializable
+data class ProviderInfo(
+    val id: String,
+    val name: String? = null,
+    val models: List<ModelInfo> = emptyList(),
+)
+
+@Serializable
+data class ModelInfo(
+    val id: String? = null,
+    val name: String? = null,
 )
