@@ -41,6 +41,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -57,6 +58,7 @@ import androidx.compose.ui.unit.sp
 import com.opencode.remote.data.api.dto.MessageInfo
 import com.opencode.remote.data.api.dto.MessagePart
 import com.opencode.remote.ui.strings.AppLocale
+import kotlinx.coroutines.delay
 
 // ─── Message Segment Parsing ─────────────────────────────────────────────
 
@@ -152,6 +154,7 @@ internal fun AiResponsePanel(
                             icon = Icons.Default.Psychology,
                             containerColor = MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.5f),
                             contentColor = MaterialTheme.colorScheme.onTertiaryContainer,
+                            showDuration = true,
                         )
                         Spacer(Modifier.height(4.dp))
                     }
@@ -206,9 +209,36 @@ internal fun ExpandableSegment(
     icon: ImageVector,
     containerColor: Color,
     contentColor: Color,
+    showDuration: Boolean = false,
 ) {
     val s = AppLocale.strings
-    var expanded by remember(isStreaming) { mutableStateOf(isStreaming) }
+    var expanded by remember { mutableStateOf(false) }
+    var startTime by remember { mutableStateOf<Long?>(null) }
+    var durationSec by remember { mutableStateOf<Int?>(null) }
+
+    // Auto-expand on stream start, auto-collapse with delay on stream end
+    LaunchedEffect(isStreaming) {
+        if (isStreaming) {
+            expanded = true
+            if (startTime == null) startTime = System.currentTimeMillis()
+        } else {
+            if (startTime != null) {
+                durationSec = ((System.currentTimeMillis() - startTime!!) / 1000).toInt()
+                startTime = null
+            }
+            if (expanded) {
+                delay(800)
+                expanded = false
+            }
+        }
+    }
+
+    val displayLabel = when {
+        !showDuration -> label
+        isStreaming -> label  // "Thinking..." passed from caller
+        durationSec != null && durationSec!! > 0 -> s.thoughtForSeconds.replace("%d", durationSec.toString())
+        else -> label  // "Thought" passed from caller
+    }
 
     Surface(
         shape = RoundedCornerShape(8.dp),
@@ -240,7 +270,7 @@ internal fun ExpandableSegment(
                     Spacer(Modifier.width(6.dp))
                 }
                 Text(
-                    text = label,
+                    text = displayLabel,
                     style = MaterialTheme.typography.labelSmall,
                     color = contentColor,
                     modifier = Modifier.weight(1f),

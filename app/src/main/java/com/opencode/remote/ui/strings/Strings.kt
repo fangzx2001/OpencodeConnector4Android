@@ -55,6 +55,7 @@ data class AppStrings(
     val thinking: String,
     val thinkingActive: String,
     val thought: String,
+    val thoughtForSeconds: String,
     val sessionFallback: String,
     val stop: String,
     val refresh: String,
@@ -158,6 +159,10 @@ data class AppStrings(
     val notificationRunning: String,
     val notificationChannelName: String,
     val notificationChannelDesc: String,
+
+    // Todo completion
+    val todoCompleted: String,
+    val todoCompletedDesc: String,
 )
 
 // ─── English ───────────────────────────────────────────────────────
@@ -205,6 +210,7 @@ val enStrings = AppStrings(
     thinking = "thinking...",
     thinkingActive = "💭 Thinking...",
     thought = "💭 Thought",
+    thoughtForSeconds = "💭 Thought for %ds",
     sessionFallback = "Session",
     stop = "Stop",
     refresh = "Refresh",
@@ -304,6 +310,8 @@ val enStrings = AppStrings(
     notificationRunning = "OConnector is running",
     notificationChannelName = "OConnector Service",
     notificationChannelDesc = "Keeps connection to server alive",
+    todoCompleted = "Tasks Completed",
+    todoCompletedDesc = "%s's task list is completed",
 )
 
 // ─── Chinese ───────────────────────────────────────────────────────
@@ -351,6 +359,7 @@ val zhStrings = AppStrings(
     thinking = "思考中...",
     thinkingActive = "💭 正在思考...",
     thought = "💭 思考",
+    thoughtForSeconds = "💭 思考了 %d 秒",
     sessionFallback = "会话",
     stop = "停止生成",
     refresh = "刷新",
@@ -450,4 +459,6 @@ val zhStrings = AppStrings(
     notificationRunning = "OConnector 正在运行",
     notificationChannelName = "OConnector 服务",
     notificationChannelDesc = "保持与服务器的连接",
+    todoCompleted = "任务完成",
+    todoCompletedDesc = "%s的任务列表已完成",
 )
