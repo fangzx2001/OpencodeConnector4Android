@@ -1,5 +1,6 @@
 package com.opencode.remote.ui
 
+import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -15,8 +16,13 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         setContent {
             OConnectorTheme(darkTheme = AppLocale.darkMode) {
-                OConnectorApp()
+                OConnectorApp(initialIntent = intent)
             }
         }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
     }
 }

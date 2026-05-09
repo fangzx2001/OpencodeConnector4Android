@@ -10,6 +10,7 @@ import android.os.IBinder
 import android.util.Log
 import com.opencode.remote.OConnectorApp
 import com.opencode.remote.data.api.OConnectorSseClient
+import com.opencode.remote.data.repository.OConnectorRepository
 import com.opencode.remote.data.sse.SseEventBus
 import com.opencode.remote.ui.MainActivity
 import dagger.hilt.android.AndroidEntryPoint
@@ -25,6 +26,7 @@ class SseForegroundService : Service() {
 
     @Inject lateinit var sseClient: OConnectorSseClient
     @Inject lateinit var eventBus: SseEventBus
+    @Inject lateinit var repository: OConnectorRepository
     @Inject @Named("applicationScope") lateinit var appScope: CoroutineScope
 
     private var sseJob: Job? = null
@@ -61,10 +63,14 @@ class SseForegroundService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     private fun createNotification(): Notification {
+        val intent = Intent(this, MainActivity::class.java).apply {
+            repository.activeSessionId?.let { putExtra("sessionId", it) }
+            repository.activeSessionDirectory?.let { putExtra("directory", it) }
+        }
         val pendingIntent = PendingIntent.getActivity(
             this, 0,
-            Intent(this, MainActivity::class.java),
-            PendingIntent.FLAG_IMMUTABLE
+            intent,
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
 
         return Notification.Builder(this, OConnectorApp.CHANNEL_ID)

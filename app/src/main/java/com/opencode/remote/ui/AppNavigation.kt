@@ -1,7 +1,11 @@
 package com.opencode.remote.ui
 
+import android.content.Intent
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.ui.platform.LocalContext
 import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.navigation.NavController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
@@ -27,8 +31,16 @@ object Routes {
 }
 
 @Composable
-fun OConnectorApp() {
+fun OConnectorApp(initialIntent: Intent? = null) {
     val navController = rememberNavController()
+    val context = LocalContext.current
+
+    // Handle notification deep link from initial intent or new intent
+    LaunchedEffect(initialIntent) {
+        val intent = (context as? MainActivity)?.intent ?: initialIntent
+        intent?.let { navigateFromIntent(it, navController) }
+    }
+
     NavHost(
         navController = navController,
         startDestination = Routes.CONNECTION
@@ -94,6 +106,17 @@ fun OConnectorApp() {
             HelpScreen(
                 onBack = { navController.popBackStack() }
             )
+        }
+    }
+}
+
+private fun navigateFromIntent(intent: Intent, navController: NavController) {
+    val sessionId = intent.getStringExtra("sessionId") ?: return
+    val directory = intent.getStringExtra("directory")
+    // Only navigate if we're not already on the chat screen
+    if (navController.currentDestination?.route?.startsWith("chat") != true) {
+        navController.navigate(Routes.chat(sessionId, directory)) {
+            popUpTo(Routes.CONNECTION) { inclusive = false }
         }
     }
 }
