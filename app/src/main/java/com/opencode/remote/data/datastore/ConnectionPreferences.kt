@@ -9,6 +9,7 @@ import androidx.datastore.preferences.preferencesDataStore
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.map
@@ -49,6 +50,7 @@ class ConnectionPreferences @Inject constructor(
         val LANGUAGE = stringPreferencesKey("app_language")
         val DARK_MODE = booleanPreferencesKey("app_dark_mode")
         val HIDE_CHILD_SESSIONS = booleanPreferencesKey("hide_child_sessions")
+        val AUTO_LOGIN_ENABLED = booleanPreferencesKey("auto_login_enabled")
     }
 
     private val masterKey by lazy {
@@ -149,6 +151,15 @@ class ConnectionPreferences @Inject constructor(
             emit(false)
         }
 
+    val autoLoginEnabled: Flow<Boolean> = context.dataStore.data
+        .map { prefs ->
+            prefs[Keys.AUTO_LOGIN_ENABLED] ?: false
+        }
+        .catch { e ->
+            Log.e(TAG, "Failed to read auto login preference", e)
+            emit(false)
+        }
+
     suspend fun saveLanguage(lang: String) {
         try {
             context.dataStore.edit { it[Keys.LANGUAGE] = lang }
@@ -170,6 +181,14 @@ class ConnectionPreferences @Inject constructor(
             context.dataStore.edit { it[Keys.HIDE_CHILD_SESSIONS] = enabled }
         } catch (e: Exception) {
             Log.e(TAG, "Failed to save hide child sessions", e)
+        }
+    }
+
+    suspend fun saveAutoLoginEnabled(enabled: Boolean) {
+        try {
+            context.dataStore.edit { it[Keys.AUTO_LOGIN_ENABLED] = enabled }
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to save auto login preference", e)
         }
     }
 
@@ -206,6 +225,54 @@ class ConnectionPreferences @Inject constructor(
             }
         } catch (e: Exception) {
             Log.e(TAG, "Failed to save config", e)
+        }
+    }
+
+    suspend fun saveSelectedAgent(sessionId: String, agentName: String?) {
+        try {
+            context.dataStore.edit {
+                val key = stringPreferencesKey("selected_agent_$sessionId")
+                if (agentName.isNullOrBlank()) {
+                    it.remove(key)
+                } else {
+                    it[key] = agentName
+                }
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to save selected agent", e)
+        }
+    }
+
+    suspend fun getSelectedAgent(sessionId: String): String? {
+        return try {
+            context.dataStore.data.first()[stringPreferencesKey("selected_agent_$sessionId")]
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to read selected agent", e)
+            null
+        }
+    }
+
+    suspend fun saveSessionDraft(sessionId: String, draft: String?) {
+        try {
+            context.dataStore.edit {
+                val key = stringPreferencesKey("session_draft_$sessionId")
+                if (draft.isNullOrBlank()) {
+                    it.remove(key)
+                } else {
+                    it[key] = draft
+                }
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to save session draft", e)
+        }
+    }
+
+    suspend fun getSessionDraft(sessionId: String): String? {
+        return try {
+            context.dataStore.data.first()[stringPreferencesKey("session_draft_$sessionId")]
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to read session draft", e)
+            null
         }
     }
 }
