@@ -118,7 +118,7 @@ class SessionsViewModel @Inject constructor(
         }
     }
 
-    private fun loadProjectName() {
+    fun loadProjectName() {
         viewModelScope.launch {
             try {
                 val project = repository.getCurrentProject()

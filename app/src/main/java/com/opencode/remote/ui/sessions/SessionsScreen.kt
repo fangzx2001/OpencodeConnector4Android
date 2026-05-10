@@ -40,6 +40,7 @@ fun SessionsScreen(
     // Auto-refresh when navigating back to this screen
     LifecycleResumeEffect(Unit) {
         viewModel.loadSessions()
+        viewModel.loadProjectName()
         onPauseOrDispose { /* no-op */ }
     }
 
@@ -235,6 +236,7 @@ fun ProjectSessionsScreen(
     // Auto-refresh when navigating back to this screen
     LifecycleResumeEffect(Unit) {
         viewModel.loadSessions()
+        viewModel.loadSessionUsageForDirectory(directory)
         onPauseOrDispose { /* no-op */ }
     }
 
