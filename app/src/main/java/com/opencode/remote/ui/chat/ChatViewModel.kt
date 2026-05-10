@@ -159,6 +159,8 @@ class ChatViewModel @Inject constructor(
     private var deltaLogCounter = 0
     private var pendingDeltas = mutableListOf<ServerEvent>()  // accumulated delta events for 16ms batching
     private var batchFlushJob: Job? = null  // debounce job for 16ms coalescing window
+    /** Queue of permission requests that arrived while another permission is being handled. */
+    private val permissionQueue = mutableListOf<PermissionRequestData>()
 
     companion object {
         private const val TAG = "ChatViewModel"
@@ -560,9 +562,15 @@ class ChatViewModel @Inject constructor(
                     always = props.always ?: emptyList(),
                     tool = props.tool,
                 )
-                _uiState.update { it.copy(chatDisplay = it.chatDisplay.copy(
-                    pendingPermission = request, isBlocked = true,
-                ))}
+                if (_uiState.value.pendingPermission != null) {
+                    // Queue the request — current one is still being handled by user
+                    permissionQueue.add(request)
+                    Log.d(TAG, "Permission queued: ${request.id}, queue size: ${permissionQueue.size}")
+                } else {
+                    _uiState.update { it.copy(chatDisplay = it.chatDisplay.copy(
+                        pendingPermission = request, isBlocked = true,
+                    ))}
+                }
             }
 
             // ── Question asked (AI question) ──
@@ -878,7 +886,7 @@ class ChatViewModel @Inject constructor(
             try {
                 repository.replyPermission(request.id, reply, message, _uiState.value.sessionDirectory)
                 Log.d(TAG, "Permission replied: $reply for ${request.id}")
-                clearBlockingState()
+                advancePermission()
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to reply permission", e)
                 val s = com.opencode.remote.ui.strings.AppLocale.strings
@@ -920,6 +928,21 @@ class ChatViewModel @Inject constructor(
                     error = s.errSendFailed.replace("%s", e.localizedMessage ?: e.javaClass.simpleName),
                 ))}
             }
+        }
+    }
+
+    /** Advance to the next queued permission, or clear blocked state if queue is empty. */
+    private fun advancePermission() {
+        if (permissionQueue.isNotEmpty()) {
+            val next = permissionQueue.removeAt(0)
+            Log.d(TAG, "Advancing to queued permission: ${next.id}, remaining: ${permissionQueue.size}")
+            _uiState.update { it.copy(chatDisplay = it.chatDisplay.copy(
+                pendingPermission = next, isBlocked = true,
+            ))}
+        } else {
+            _uiState.update { it.copy(chatDisplay = it.chatDisplay.copy(
+                pendingPermission = null, isBlocked = false,
+            ))}
         }
     }
 

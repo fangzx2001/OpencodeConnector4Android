@@ -175,6 +175,9 @@ data class AppStrings(
     val questionSubmit: String,
     val questionDismiss: String,
     val questionCustomPlaceholder: String,
+    val questionBack: String,
+    val questionNext: String,
+    val questionStep: String,
     val aiWaiting: String,
 )
 
@@ -337,6 +340,9 @@ val enStrings = AppStrings(
     questionSubmit = "Submit",
     questionDismiss = "Dismiss",
     questionCustomPlaceholder = "Type your answer...",
+    questionBack = "Back",
+    questionNext = "Next",
+    questionStep = "Step",
     aiWaiting = "AI waiting for your response...",
 )
 
@@ -499,5 +505,8 @@ val zhStrings = AppStrings(
     questionSubmit = "提交",
     questionDismiss = "忽略",
     questionCustomPlaceholder = "输入你的回答...",
+    questionBack = "返回",
+    questionNext = "下一步",
+    questionStep = "步骤",
     aiWaiting = "AI 等待你的回复...",
 )

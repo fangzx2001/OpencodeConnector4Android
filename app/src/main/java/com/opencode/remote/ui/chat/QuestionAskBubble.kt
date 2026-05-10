@@ -21,13 +21,32 @@ internal fun QuestionAskBubble(
     modifier: Modifier = Modifier,
 ) {
     val s = AppLocale.strings
+    if (questions.isEmpty()) return
 
-    // For simplicity, handle the first question (most common case)
-    val question = questions.firstOrNull() ?: return
+    var currentIndex by remember(questions) { mutableStateOf(0) }
 
-    // Track selected options (by label)
-    var selectedOptions by remember(questions.firstOrNull()?.question) { mutableStateOf(emptySet<String>()) }
-    var customAnswer by remember(questions.firstOrNull()?.question) { mutableStateOf("") }
+    // Per-question selected options
+    val selectedOptionsList = remember(questions) {
+        questions.map { mutableStateOf(emptySet<String>()) }
+    }
+    // Per-question custom answers
+    val customAnswerList = remember(questions) {
+        questions.map { mutableStateOf("") }
+    }
+
+    val totalQuestions = questions.size
+    val question = questions[currentIndex]
+    val isFirst = currentIndex == 0
+    val isLast = currentIndex == totalQuestions - 1
+
+    val selectedOptions by selectedOptionsList[currentIndex]
+    val customAnswer by customAnswerList[currentIndex]
+
+    val hasAnswer = if (question.options.isNotEmpty()) {
+        selectedOptions.isNotEmpty()
+    } else {
+        customAnswer.isNotBlank()
+    }
 
     Card(
         modifier = modifier.fillMaxWidth(),
@@ -57,6 +76,29 @@ internal fun QuestionAskBubble(
                 )
             }
 
+            // Progress (only for multi-question)
+            if (totalQuestions > 1) {
+                Spacer(Modifier.height(8.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        "${s.questionStep} ${currentIndex + 1} / $totalQuestions",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onTertiaryContainer.copy(alpha = 0.7f),
+                    )
+                }
+                Spacer(Modifier.height(4.dp))
+                LinearProgressIndicator(
+                    progress = { (currentIndex + 1).toFloat() / totalQuestions },
+                    modifier = Modifier.fillMaxWidth(),
+                    color = MaterialTheme.colorScheme.tertiary,
+                    trackColor = MaterialTheme.colorScheme.tertiaryContainer,
+                )
+            }
+
             // Question text
             if (question.question.isNotBlank()) {
                 Spacer(Modifier.height(8.dp))
@@ -76,11 +118,13 @@ internal fun QuestionAskBubble(
                         FilterChip(
                             selected = isSelected,
                             onClick = {
-                                if (question.multiple) {
-                                    selectedOptions = if (isSelected) selectedOptions - option.label else selectedOptions + option.label
+                                val newSet = if (question.multiple) {
+                                    if (isSelected) selectedOptions - option.label
+                                    else selectedOptions + option.label
                                 } else {
-                                    selectedOptions = setOf(option.label)
+                                    setOf(option.label)
                                 }
+                                selectedOptionsList[currentIndex].value = newSet
                             },
                             label = {
                                 Column {
@@ -105,7 +149,7 @@ internal fun QuestionAskBubble(
                 Spacer(Modifier.height(8.dp))
                 OutlinedTextField(
                     value = customAnswer,
-                    onValueChange = { customAnswer = it },
+                    onValueChange = { customAnswerList[currentIndex].value = it },
                     placeholder = { Text(s.questionCustomPlaceholder) },
                     modifier = Modifier.fillMaxWidth(),
                     maxLines = 3,
@@ -113,28 +157,56 @@ internal fun QuestionAskBubble(
                 )
             }
 
-            // Action buttons
+            // Navigation buttons
             Spacer(Modifier.height(12.dp))
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                FilledTonalButton(
+                if (!isFirst) {
+                    OutlinedButton(
+                        onClick = { currentIndex-- },
+                        modifier = Modifier.weight(1f),
+                    ) {
+                        Text(s.questionBack)
+                    }
+                }
+
+                if (!isLast) {
+                    Button(
+                        onClick = { currentIndex++ },
+                        enabled = hasAnswer,
+                        modifier = Modifier.weight(1f),
+                    ) {
+                        Text(s.questionNext)
+                    }
+                }
+            }
+
+            // Submit + Dismiss
+            Spacer(Modifier.height(8.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Button(
                     onClick = {
-                        val answers = mutableListOf<List<String>>()
-                        val selected = selectedOptions.toList()
-                        val custom = customAnswer.trim()
-                        if (selected.isNotEmpty()) {
-                            answers.add(selected)
-                        } else if (custom.isNotEmpty()) {
-                            answers.add(listOf(custom))
+                        val answers = questions.indices.mapNotNull { idx ->
+                            val sel = selectedOptionsList[idx].value
+                            val custom = customAnswerList[idx].value
+                            when {
+                                sel.isNotEmpty() -> sel.toList()
+                                custom.isNotBlank() -> listOf(custom)
+                                else -> null
+                            }
                         }
                         if (answers.isNotEmpty()) {
                             onReply(answers)
                         }
                     },
-                    enabled = selectedOptions.isNotEmpty() || customAnswer.isNotBlank(),
+                    enabled = isLast && hasAnswer,
                     modifier = Modifier.weight(1f),
                 ) {
                     Text(s.questionSubmit)
