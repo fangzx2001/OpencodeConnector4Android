@@ -1,5 +1,9 @@
 package com.opencode.remote.ui.sessions
 
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
+import android.widget.Toast
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -10,6 +14,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -35,6 +40,7 @@ fun SessionsScreen(
     // Auto-refresh when navigating back to this screen
     LifecycleResumeEffect(Unit) {
         viewModel.loadSessions()
+        viewModel.loadProjectName()
         onPauseOrDispose { /* no-op */ }
     }
 
@@ -71,7 +77,7 @@ fun SessionsScreen(
                     IconButton(onClick = { viewModel.loadSessions() }) {
                         Icon(Icons.Default.Refresh, contentDescription = s.refresh)
                     }
-                    IconButton(onClick = onDisconnected) {
+                    IconButton(onClick = { viewModel.logout(onDisconnected) }) {
                         Icon(Icons.Default.PowerSettingsNew, contentDescription = s.disconnect)
                     }
                 },
@@ -230,6 +236,7 @@ fun ProjectSessionsScreen(
     // Auto-refresh when navigating back to this screen
     LifecycleResumeEffect(Unit) {
         viewModel.loadSessions()
+        viewModel.loadSessionUsageForDirectory(directory)
         onPauseOrDispose { /* no-op */ }
     }
 
@@ -244,6 +251,12 @@ fun ProjectSessionsScreen(
         uiState.sessions
             .filter { it.directory == directory }
             .sortedByDescending { it.time?.updated ?: it.time?.created ?: 0L }
+    }
+
+    LaunchedEffect(directory, projectSessions.map { it.id }) {
+        if (directory.isNotBlank()) {
+            viewModel.loadSessionUsageForDirectory(directory)
+        }
     }
 
     Scaffold(
@@ -338,9 +351,12 @@ fun ProjectSessionsScreen(
                         ) { session ->
                             SessionCard(
                                 session = session,
+                                usage = uiState.sessionUsageById[session.id],
                                 onClick = { onSessionClick(session.id) },
                                 onDelete = { viewModel.deleteSession(session.id, directory) },
                                 onFork = { viewModel.forkSession(session.id, directory) },
+                                onRename = { title, onSuccess -> viewModel.renameSession(session.id, title, directory, onSuccess) },
+                                onToggleShare = { onSuccess -> viewModel.toggleShareSession(session.id, session.shared, directory, onSuccess) },
                             )
                         }
                     }
@@ -358,12 +374,20 @@ fun ProjectSessionsScreen(
 @Composable
 private fun SessionCard(
     session: SessionInfo,
+    usage: SessionUsageSummary?,
     onClick: () -> Unit,
     onDelete: () -> Unit,
     onFork: () -> Unit,
+    onRename: (String, () -> Unit) -> Unit,
+    onToggleShare: ((SessionInfo) -> Unit) -> Unit,
 ) {
     var showMenu by remember { mutableStateOf(false) }
+    var showRenameDialog by remember { mutableStateOf(false) }
+    var renameText by remember(session.id, session.title, session.slug) {
+        mutableStateOf(session.title ?: session.slug ?: "")
+    }
     val s = AppLocale.strings
+    val context = LocalContext.current
 
     Card(
         modifier = Modifier
@@ -412,6 +436,13 @@ private fun SessionCard(
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
+                    usage?.let { u ->
+                        Text(
+                            text = u.usagePercent?.let { "$it%" } ?: "${u.totalTokens} ${s.contextTokens}",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.primary,
+                        )
+                    }
                 }
             }
 
@@ -426,6 +457,65 @@ private fun SessionCard(
                     expanded = showMenu,
                     onDismissRequest = { showMenu = false },
                 ) {
+                    DropdownMenuItem(
+                        text = { Text(s.renameSession) },
+                        leadingIcon = { Icon(Icons.Default.Edit, contentDescription = null) },
+                        onClick = {
+                            showMenu = false
+                            renameText = session.title ?: session.slug ?: ""
+                            showRenameDialog = true
+                        },
+                    )
+                    DropdownMenuItem(
+                        text = { Text(if (session.shared) s.unshareSession else s.shareSession) },
+                        leadingIcon = {
+                            Icon(
+                                if (session.shared) Icons.Default.LinkOff else Icons.Default.Link,
+                                contentDescription = null,
+                            )
+                        },
+                        onClick = {
+                            showMenu = false
+                            onToggleShare { updated ->
+                                if (updated.shared) {
+                                    val link = updated.share?.url
+                                    if (!link.isNullOrBlank()) {
+                                        copyToClipboard(context, s.copyShareLink, link)
+                                        Toast.makeText(context, s.copiedShareLink, Toast.LENGTH_SHORT).show()
+                                    } else {
+                                        Toast.makeText(context, s.sessionShared, Toast.LENGTH_SHORT).show()
+                                    }
+                                } else {
+                                    Toast.makeText(context, s.sessionUnshared, Toast.LENGTH_SHORT).show()
+                                }
+                            }
+                        },
+                    )
+                    if (!session.share?.url.isNullOrBlank()) {
+                        DropdownMenuItem(
+                            text = { Text(s.copyShareLink) },
+                            leadingIcon = { Icon(Icons.Default.ContentCopy, contentDescription = null) },
+                            onClick = {
+                                showMenu = false
+                                val link = session.share?.url
+                                if (!link.isNullOrBlank()) {
+                                    copyToClipboard(context, s.copyShareLink, link)
+                                    Toast.makeText(context, s.copiedShareLink, Toast.LENGTH_SHORT).show()
+                                } else {
+                                    Toast.makeText(context, s.errCopyShareLink, Toast.LENGTH_SHORT).show()
+                                }
+                            },
+                        )
+                    }
+                    DropdownMenuItem(
+                        text = { Text(s.copySessionId) },
+                        leadingIcon = { Icon(Icons.Default.ContentCopy, contentDescription = null) },
+                        onClick = {
+                            showMenu = false
+                            copyToClipboard(context, s.copySessionId, session.id)
+                            Toast.makeText(context, s.copiedSessionId, Toast.LENGTH_SHORT).show()
+                        },
+                    )
                     DropdownMenuItem(
                         text = { Text(s.forkSession) },
                         leadingIcon = { Icon(Icons.Default.ForkRight, contentDescription = null) },
@@ -452,4 +542,42 @@ private fun SessionCard(
             }
         }
     }
+
+    if (showRenameDialog) {
+        AlertDialog(
+            onDismissRequest = { showRenameDialog = false },
+            title = { Text(s.renameDialogTitle) },
+            text = {
+                OutlinedTextField(
+                    value = renameText,
+                    onValueChange = { renameText = it },
+                    singleLine = true,
+                    label = { Text(s.sessionTitleLabel) },
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        onRename(renameText) {
+                            showRenameDialog = false
+                            Toast.makeText(context, s.renameSuccess, Toast.LENGTH_SHORT).show()
+                        }
+                    },
+                    enabled = renameText.trim().isNotEmpty(),
+                ) {
+                    Text(s.save)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showRenameDialog = false }) {
+                    Text(s.cancel)
+                }
+            },
+        )
+    }
+}
+
+private fun copyToClipboard(context: Context, label: String, text: String) {
+    val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+    clipboard.setPrimaryClip(ClipData.newPlainText(label, text))
 }

@@ -38,6 +38,8 @@ class ConnectionViewModel @Inject constructor(
         private const val TAG = "ConnectionViewModel"
     }
 
+    private var autoConnectAttempted = false
+
     init {
         viewModelScope.launch {
             // 只读取一次保存的配置，避免后续 saveConfig 写入时覆盖用户正在编辑的输入
@@ -53,6 +55,12 @@ class ConnectionViewModel @Inject constructor(
                             useTls = config.useTls,
                             insecureTrust = config.insecureTrust,
                         )
+                    }
+
+                    val shouldAutoConnect = preferences.autoLoginEnabled.first()
+                    if (!autoConnectAttempted && shouldAutoConnect && config.host.isNotBlank()) {
+                        autoConnectAttempted = true
+                        connectInternal(config)
                     }
                 }
         }
@@ -100,19 +108,25 @@ class ConnectionViewModel @Inject constructor(
             return
         }
 
+        val config = ConnectionConfig(
+            host = host,
+            port = port,
+            username = state.username.trim(),
+            password = state.password,
+            useTls = state.useTls,
+            insecureTrust = state.insecureTrust,
+        )
+
+        connectInternal(config)
+    }
+
+    private fun connectInternal(config: ConnectionConfig) {
+        val s = com.opencode.remote.ui.strings.AppLocale.strings
+
         viewModelScope.launch {
             _uiState.update { it.copy(isConnecting = true, error = null) }
 
             try {
-                val config = ConnectionConfig(
-                    host = host,
-                    port = port,
-                    username = state.username.trim(),
-                    password = state.password,
-                    useTls = state.useTls,
-                    insecureTrust = state.insecureTrust,
-                )
-
                 // 在 IO 线程创建 HttpClient（避免在主线程加载引擎/依赖）
                 withContext(Dispatchers.IO) {
                     repository.connect(config)
@@ -120,6 +134,7 @@ class ConnectionViewModel @Inject constructor(
 
                 // Save preferences
                 preferences.saveConfig(config)
+                preferences.saveAutoLoginEnabled(true)
 
                 // Test connection on IO thread
                 val success = withContext(Dispatchers.IO) {
@@ -155,6 +170,18 @@ class ConnectionViewModel @Inject constructor(
                     )
                 }
             }
+        }
+    }
+
+    fun logout() {
+        viewModelScope.launch {
+            try {
+                repository.disconnect()
+            } catch (e: Exception) {
+                Log.w(TAG, "Disconnect during logout failed", e)
+            }
+            preferences.saveAutoLoginEnabled(false)
+            _uiState.update { it.copy(isConnected = false, isConnecting = false) }
         }
     }
 

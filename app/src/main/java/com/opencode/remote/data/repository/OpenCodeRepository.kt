@@ -40,13 +40,24 @@ interface OConnectorRepository {
     suspend fun createSession(directory: String? = null): CreateSessionResponse
     suspend fun getSession(sessionId: String, directory: String? = null): SessionInfo
     suspend fun deleteSession(sessionId: String, directory: String? = null)
+    suspend fun updateSessionTitle(sessionId: String, title: String, directory: String? = null): SessionInfo
     suspend fun forkSession(sessionId: String, directory: String? = null): CreateSessionResponse
+    suspend fun shareSession(sessionId: String, directory: String? = null): SessionInfo
+    suspend fun unshareSession(sessionId: String, directory: String? = null): SessionInfo
     suspend fun abortSession(sessionId: String, directory: String? = null)
+    suspend fun summarizeSession(sessionId: String, providerID: String, modelID: String, directory: String? = null)
 
     // ─── Message Operations ──────────────────────────────────────────
 
     suspend fun getMessages(sessionId: String, directory: String? = null): List<MessageInfo>
-    suspend fun sendMessage(sessionId: String, message: String, agent: String? = null, directory: String? = null)
+    suspend fun sendMessage(
+        sessionId: String,
+        message: String,
+        agent: String? = null,
+        model: SendMessageModelRef? = null,
+        variant: String? = null,
+        directory: String? = null,
+    )
 
     // ─── Todo ────────────────────────────────────────────────────────
 
@@ -63,8 +74,12 @@ interface OConnectorRepository {
 
     // ─── Agents ─────────────────────────────────────────────────────────
 
-    suspend fun listAgents(): List<AgentInfo>
+    suspend fun listAgents(directory: String? = null): List<AgentInfo>
     fun getCachedAgents(): List<AgentInfo>
+    suspend fun listProviders(): List<ProviderInfo>
+    fun getCachedProviders(): List<ProviderInfo>
+    fun getCachedProviderDefaults(): Map<String, String>
+    fun getCachedConnectedProviderIds(): List<String>
 
     // ─── SSE Events ──────────────────────────────────────────────────
 
@@ -93,6 +108,9 @@ class OConnectorRepositoryImpl @Inject constructor(
 
     private var connected = false
     private var cachedAgents: List<AgentInfo>? = null
+    private var cachedProviders: List<ProviderInfo>? = null
+    private var cachedProviderDefaults: Map<String, String> = emptyMap()
+    private var cachedConnectedProviderIds: List<String> = emptyList()
 
     override val isConnected: Boolean
         get() = connected
@@ -120,6 +138,9 @@ class OConnectorRepositoryImpl @Inject constructor(
         SseForegroundService.stop(context)
         connected = false
         cachedAgents = null
+        cachedProviders = null
+        cachedProviderDefaults = emptyMap()
+        cachedConnectedProviderIds = emptyList()
     }
 
     private fun requireClient(): OConnectorApiClient {
@@ -144,19 +165,37 @@ class OConnectorRepositoryImpl @Inject constructor(
     override suspend fun deleteSession(sessionId: String, directory: String?) =
         requireClient().deleteSession(sessionId, directory)
 
+    override suspend fun updateSessionTitle(sessionId: String, title: String, directory: String?): SessionInfo =
+        requireClient().updateSession(sessionId, title, directory)
+
     override suspend fun forkSession(sessionId: String, directory: String?): CreateSessionResponse =
         requireClient().forkSession(sessionId, directory)
 
+    override suspend fun shareSession(sessionId: String, directory: String?): SessionInfo =
+        requireClient().shareSession(sessionId, directory)
+
+    override suspend fun unshareSession(sessionId: String, directory: String?): SessionInfo =
+        requireClient().unshareSession(sessionId, directory)
+
     override suspend fun abortSession(sessionId: String, directory: String?) =
         requireClient().abortSession(sessionId, directory)
+
+    override suspend fun summarizeSession(sessionId: String, providerID: String, modelID: String, directory: String?) =
+        requireClient().summarizeSession(sessionId, providerID, modelID, directory)
 
     // ─── Message Operations ──────────────────────────────────────────
 
     override suspend fun getMessages(sessionId: String, directory: String?): List<MessageInfo> =
         requireClient().getMessages(sessionId, directory)
 
-    override suspend fun sendMessage(sessionId: String, message: String, agent: String?, directory: String?) =
-        requireClient().sendMessage(sessionId, message, agent, directory)
+    override suspend fun sendMessage(
+        sessionId: String,
+        message: String,
+        agent: String?,
+        model: SendMessageModelRef?,
+        variant: String?,
+        directory: String?,
+    ) = requireClient().sendMessage(sessionId, message, agent, model, variant, directory)
 
     // ─── Todo ────────────────────────────────────────────────────────
 
@@ -178,16 +217,35 @@ class OConnectorRepositoryImpl @Inject constructor(
 
     // ─── Agents ─────────────────────────────────────────────────────────
 
-    override suspend fun listAgents(): List<AgentInfo> {
-        cachedAgents?.let { return it }
-        val agents = requireClient().listAgents()
-            .filter { !it.hidden }
-        cachedAgents = agents
+    override suspend fun listAgents(directory: String?): List<AgentInfo> {
+        if (directory == null) {
+            cachedAgents?.let { return it }
+        }
+        val agents = requireClient().listAgents(directory)
+        if (directory == null) {
+            cachedAgents = agents
+        }
         return agents
     }
 
     /** Get cached agents (returns empty list if not loaded yet) */
     override fun getCachedAgents(): List<AgentInfo> = cachedAgents ?: emptyList()
+
+    override suspend fun listProviders(): List<ProviderInfo> {
+        cachedProviders?.let { return it }
+        val response = requireClient().listProviders()
+        val providers = response.items
+        cachedProviders = providers
+        cachedProviderDefaults = response.default
+        cachedConnectedProviderIds = response.connected
+        return providers
+    }
+
+    override fun getCachedProviders(): List<ProviderInfo> = cachedProviders ?: emptyList()
+
+    override fun getCachedProviderDefaults(): Map<String, String> = cachedProviderDefaults
+
+    override fun getCachedConnectedProviderIds(): List<String> = cachedConnectedProviderIds
 
     // ─── SSE Events ──────────────────────────────────────────────────
 

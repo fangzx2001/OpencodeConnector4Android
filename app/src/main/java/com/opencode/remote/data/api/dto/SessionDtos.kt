@@ -22,7 +22,14 @@ data class SessionInfo(
     val permission: List<SessionPermission>? = null,
     @SerialName("parentID")
     val parentID: String? = null,
+    val shared: Boolean = false,
+    val share: SessionShare? = null,
     val time: SessionTime? = null,
+)
+
+@Serializable
+data class SessionShare(
+    val url: String? = null,
 )
 
 @Serializable
@@ -45,6 +52,7 @@ data class SessionTime(
     val updated: Long? = null,
     val initialized: Long? = null,
     val completed: Long? = null,
+    val archived: Long? = null,
 )
 
 /**
@@ -61,6 +69,19 @@ data class CreateSessionResponse(
     val path: String? = null,
     val version: String? = null,
     val time: SessionTime? = null,
+)
+
+@Serializable
+data class UpdateSessionRequest(
+    val title: String? = null,
+)
+
+@Serializable
+data class SummarizeSessionRequest(
+    @SerialName("providerID")
+    val providerID: String,
+    @SerialName("modelID")
+    val modelID: String,
 )
 
 // session 列表就是 List<SessionInfo>，无需额外包装
@@ -89,6 +110,15 @@ data class MessageInfoData(
     val parentID: String? = null,
     val agent: String? = null,
     val mode: String? = null,
+    @SerialName("providerID")
+    val providerID: String? = null,
+    @SerialName("providerId")
+    val providerId: String? = null,
+    @SerialName("modelID")
+    val modelID: String? = null,
+    @SerialName("modelId")
+    val modelId: String? = null,
+    val variant: String? = null,
     val model: MessageModel? = null,
     val time: MessageTime? = null,
     val finish: String? = null,
@@ -96,15 +126,27 @@ data class MessageInfoData(
     val tokens: MessageTokens? = null,
     /** 服务器可能返回 boolean(true) 或 object({diffs:[...]})，用 JsonElement 兼容 */
     val summary: JsonElement? = null,
-)
+) {
+    val resolvedProviderID: String? get() = model?.resolvedProviderID ?: providerID ?: providerId
+    val resolvedModelID: String? get() = model?.resolvedModelID ?: modelID ?: modelId
+    val resolvedVariant: String? get() = model?.variant ?: variant
+}
 
 @Serializable
 data class MessageModel(
     @SerialName("providerID")
     val providerID: String? = null,
+    @SerialName("providerId")
+    val providerId: String? = null,
     @SerialName("modelID")
     val modelID: String? = null,
-)
+    @SerialName("modelId")
+    val modelId: String? = null,
+    val variant: String? = null,
+) {
+    val resolvedProviderID: String? get() = providerID ?: providerId
+    val resolvedModelID: String? get() = modelID ?: modelId
+}
 
 @Serializable
 data class MessageTime(
@@ -118,6 +160,17 @@ data class MessageTokens(
     val input: Int? = null,
     val output: Int? = null,
     val reasoning: Int? = null,
+    val cache: MessageTokenCache? = null,
+    @SerialName("cacheRead")
+    val cacheRead: Int? = null,
+    @SerialName("cacheWrite")
+    val cacheWrite: Int? = null,
+)
+
+@Serializable
+data class MessageTokenCache(
+    val read: Int? = null,
+    val write: Int? = null,
 )
 
 /**
@@ -175,6 +228,16 @@ data class ToolState(
 data class SendMessageRequest(
     val parts: List<SendMessagePart>,
     val agent: String? = null,
+    val model: SendMessageModelRef? = null,
+    val variant: String? = null,
+)
+
+@Serializable
+data class SendMessageModelRef(
+    @SerialName("providerID")
+    val providerID: String,
+    @SerialName("modelID")
+    val modelID: String,
 )
 
 @Serializable
