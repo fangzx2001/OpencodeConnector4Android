@@ -239,6 +239,44 @@ class OConnectorApiClient @Inject constructor(
         }
     }
 
+    // ─── Permission / Question Replies ──────────────────────────────────
+
+    /** POST /permission/:requestId/reply — respond to a permission.asked event */
+    suspend fun replyPermission(requestId: String, reply: String, message: String? = null, directory: String? = null) {
+        client.post("/permission/$requestId/reply") {
+            setBody(PermissionReplyPayload(reply = reply, message = message))
+            directory?.let {
+                parameter("directory", it)
+                header("x-opencode-directory", encDir(it))
+            }
+        }
+        Log.d(TAG, "Permission reply: $reply for request=$requestId")
+    }
+
+    /** POST /question/:requestId/reply — respond to a question.asked event */
+    suspend fun replyQuestion(requestId: String, answers: List<List<String>>, directory: String? = null) {
+        client.post("/question/$requestId/reply") {
+            setBody(QuestionReplyPayload(answers = answers))
+            directory?.let {
+                parameter("directory", it)
+                header("x-opencode-directory", encDir(it))
+            }
+        }
+        Log.d(TAG, "Question reply: ${answers.size} answers for request=$requestId")
+    }
+
+    /** POST /question/:requestId/reject — dismiss a question.asked event */
+    suspend fun rejectQuestion(requestId: String, directory: String? = null) {
+        client.post("/question/$requestId/reject") {
+            setBody("{}")
+            directory?.let {
+                parameter("directory", it)
+                header("x-opencode-directory", encDir(it))
+            }
+        }
+        Log.d(TAG, "Question rejected for request=$requestId")
+    }
+
     // ─── Todo ──────────────────────────────────────────────────────────
 
     /** GET /session/{id}/todo → returns array directly */

@@ -27,6 +27,24 @@ data class ResponseSegment(
     val id: String? = null,  // callID for tool segments, null for text/thinking — prevents tool calls from overwriting each other
 )
 
+/** Permission request data extracted from permission.asked SSE event. */
+data class PermissionRequestData(
+    val id: String,
+    val sessionID: String,
+    val permission: String,
+    val patterns: List<String> = emptyList(),
+    val always: List<String> = emptyList(),
+    val tool: ToolRef? = null,
+)
+
+/** Question request data extracted from question.asked SSE event. */
+data class QuestionRequestData(
+    val id: String,
+    val sessionID: String,
+    val questions: List<QuestionInfoDto>,
+    val tool: ToolRef? = null,
+)
+
 /** Session metadata — changes infrequently (init, session events). */
 data class SessionMetaState(
     val sessionId: String = "",
@@ -65,6 +83,10 @@ data class ChatDisplayState(
     val availableModels: List<ModelInfo> = emptyList(),
     // Context state
     val contextUsageK: String = "0K",
+    // Blocking interaction state (permission/question bubbles)
+    val pendingPermission: PermissionRequestData? = null,
+    val pendingQuestion: QuestionRequestData? = null,
+    val isBlocked: Boolean = false,  // true when AI is waiting for user response
 )
 
 data class ChatUiState(
@@ -100,6 +122,9 @@ data class ChatUiState(
     val selectedModel get() = chatDisplay.selectedModel
     val availableModels get() = chatDisplay.availableModels
     val contextUsageK get() = chatDisplay.contextUsageK
+    val pendingPermission get() = chatDisplay.pendingPermission
+    val pendingQuestion get() = chatDisplay.pendingQuestion
+    val isBlocked get() = chatDisplay.isBlocked
 }
 
 @HiltViewModel
@@ -501,6 +526,43 @@ class ChatViewModel @Inject constructor(
                 loadTodoList()
             }
 
+            // ── Permission asked (tool confirmation) ──
+            "permission.asked" -> {
+                val requestId = props.id ?: return
+                val permType = props.permission ?: return
+                val sessionId = props.sessionID ?: currentSessionId
+                Log.d(TAG, "Permission asked: id=$requestId perm=$permType patterns=${props.patterns}")
+                val request = PermissionRequestData(
+                    id = requestId,
+                    sessionID = sessionId,
+                    permission = permType,
+                    patterns = props.patterns ?: emptyList(),
+                    always = props.always ?: emptyList(),
+                    tool = props.tool,
+                )
+                _uiState.update { it.copy(chatDisplay = it.chatDisplay.copy(
+                    pendingPermission = request, isBlocked = true,
+                ))}
+            }
+
+            // ── Question asked (AI question) ──
+            "question.asked" -> {
+                val requestId = props.id ?: return
+                val questions = props.questions ?: return
+                val sessionId = props.sessionID ?: currentSessionId
+                if (questions.isEmpty()) return
+                Log.d(TAG, "Question asked: id=$requestId questions=${questions.size}")
+                val request = QuestionRequestData(
+                    id = requestId,
+                    sessionID = sessionId,
+                    questions = questions,
+                    tool = props.tool,
+                )
+                _uiState.update { it.copy(chatDisplay = it.chatDisplay.copy(
+                    pendingQuestion = request, isBlocked = true,
+                ))}
+            }
+
             // ── Internal sync (ignore) ──
             "sync" -> { /* silently ignore */ }
 
@@ -570,6 +632,7 @@ class ChatViewModel @Inject constructor(
     fun sendMessage() {
         val text = _uiState.value.inputText.trim()
         if (text.isEmpty()) return
+        if (_uiState.value.isBlocked) return
 
         // When user hasn't explicitly picked an agent, send null to let the server
         // use its configured default (from opencode.json). DO NOT try to guess via
@@ -746,6 +809,65 @@ class ChatViewModel @Inject constructor(
 
     fun clearError() {
         _uiState.update { it.copy(chatDisplay = it.chatDisplay.copy(error = null)) }
+    }
+
+    // ── Permission / Question Reply Methods ────────────────────────────
+
+    fun replyPermission(reply: String, message: String? = null) {
+        val request = _uiState.value.pendingPermission ?: return
+        viewModelScope.launch {
+            try {
+                repository.replyPermission(request.id, reply, message, _uiState.value.sessionDirectory)
+                Log.d(TAG, "Permission replied: $reply for ${request.id}")
+                clearBlockingState()
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to reply permission", e)
+                val s = com.opencode.remote.ui.strings.AppLocale.strings
+                _uiState.update { it.copy(chatDisplay = it.chatDisplay.copy(
+                    error = s.errSendFailed.replace("%s", e.localizedMessage ?: e.javaClass.simpleName),
+                ))}
+            }
+        }
+    }
+
+    fun replyQuestion(answers: List<List<String>>) {
+        val request = _uiState.value.pendingQuestion ?: return
+        viewModelScope.launch {
+            try {
+                repository.replyQuestion(request.id, answers, _uiState.value.sessionDirectory)
+                Log.d(TAG, "Question replied for ${request.id}")
+                clearBlockingState()
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to reply question", e)
+                val s = com.opencode.remote.ui.strings.AppLocale.strings
+                _uiState.update { it.copy(chatDisplay = it.chatDisplay.copy(
+                    error = s.errSendFailed.replace("%s", e.localizedMessage ?: e.javaClass.simpleName),
+                ))}
+            }
+        }
+    }
+
+    fun rejectQuestion() {
+        val request = _uiState.value.pendingQuestion ?: return
+        viewModelScope.launch {
+            try {
+                repository.rejectQuestion(request.id, _uiState.value.sessionDirectory)
+                Log.d(TAG, "Question rejected for ${request.id}")
+                clearBlockingState()
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to reject question", e)
+                val s = com.opencode.remote.ui.strings.AppLocale.strings
+                _uiState.update { it.copy(chatDisplay = it.chatDisplay.copy(
+                    error = s.errSendFailed.replace("%s", e.localizedMessage ?: e.javaClass.simpleName),
+                ))}
+            }
+        }
+    }
+
+    private fun clearBlockingState() {
+        _uiState.update { it.copy(chatDisplay = it.chatDisplay.copy(
+            pendingPermission = null, pendingQuestion = null, isBlocked = false,
+        ))}
     }
 
     private fun showTodoCompletionNotification() {

@@ -48,6 +48,12 @@ interface OConnectorRepository {
     suspend fun getMessages(sessionId: String, directory: String? = null): List<MessageInfo>
     suspend fun sendMessage(sessionId: String, message: String, agent: String? = null, directory: String? = null)
 
+    // ─── Permission / Question Replies ──────────────────────────────
+
+    suspend fun replyPermission(requestId: String, reply: String, message: String? = null, directory: String? = null)
+    suspend fun replyQuestion(requestId: String, answers: List<List<String>>, directory: String? = null)
+    suspend fun rejectQuestion(requestId: String, directory: String? = null)
+
     // ─── Todo ────────────────────────────────────────────────────────
 
     suspend fun getTodoList(sessionId: String, directory: String? = null): List<TodoItem>
@@ -178,6 +184,17 @@ class OConnectorRepositoryImpl @Inject constructor(
 
     override suspend fun sendMessage(sessionId: String, message: String, agent: String?, directory: String?) =
         requireClient().sendMessage(sessionId, message, agent, directory)
+
+    // ─── Permission / Question Replies ──────────────────────────────
+
+    override suspend fun replyPermission(requestId: String, reply: String, message: String?, directory: String?) =
+        requireClient().replyPermission(requestId, reply, message, directory)
+
+    override suspend fun replyQuestion(requestId: String, answers: List<List<String>>, directory: String?) =
+        requireClient().replyQuestion(requestId, answers, directory)
+
+    override suspend fun rejectQuestion(requestId: String, directory: String?) =
+        requireClient().rejectQuestion(requestId, directory)
 
     // ─── Todo ────────────────────────────────────────────────────────
 

@@ -171,12 +171,60 @@ fun ChatScreen(
                     )
                 },
                 bottomBar = {
-                    ChatInputBar(
-                        inputText = uiState.inputText,
-                        onInputChange = viewModel::onInputChange,
-                        onSend = viewModel::sendMessage,
-                        isSending = uiState.isSending,
-                    )
+                    Column {
+                        // Permission/Question bubble (between messages and input)
+                        uiState.pendingPermission?.let { request ->
+                            PermissionConfirmBubble(
+                                permission = request.permission,
+                                patterns = request.patterns,
+                                alwaysPatterns = request.always,
+                                onReply = { reply, message -> viewModel.replyPermission(reply, message) },
+                                modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+                            )
+                        }
+
+                        uiState.pendingQuestion?.let { request ->
+                            QuestionAskBubble(
+                                questions = request.questions,
+                                onReply = { answers -> viewModel.replyQuestion(answers) },
+                                onReject = { viewModel.rejectQuestion() },
+                                modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+                            )
+                        }
+
+                        // AI waiting indicator when blocked
+                        if (uiState.isBlocked) {
+                            Surface(
+                                tonalElevation = 2.dp,
+                                modifier = Modifier.fillMaxWidth(),
+                            ) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 16.dp, vertical = 6.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                ) {
+                                    CircularProgressIndicator(
+                                        modifier = Modifier.size(14.dp),
+                                        strokeWidth = 2.dp,
+                                    )
+                                    Text(
+                                        s.aiWaiting,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                }
+                            }
+                        }
+
+                        ChatInputBar(
+                            inputText = uiState.inputText,
+                            onInputChange = viewModel::onInputChange,
+                            onSend = viewModel::sendMessage,
+                            isSending = uiState.isSending || uiState.isBlocked,
+                        )
+                    }
                 },
             ) { padding ->
                 Box(

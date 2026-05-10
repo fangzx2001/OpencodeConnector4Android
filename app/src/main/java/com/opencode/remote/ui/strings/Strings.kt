@@ -163,6 +163,19 @@ data class AppStrings(
     // Todo completion
     val todoCompleted: String,
     val todoCompletedDesc: String,
+
+    // Permission/Question bubbles
+    val permissionRequired: String,
+    val permissionAllowOnce: String,
+    val permissionAllowAlways: String,
+    val permissionReject: String,
+    val permissionRejectReason: String,
+    val permissionConfirmTitle: String,
+    val questionTitle: String,
+    val questionSubmit: String,
+    val questionDismiss: String,
+    val questionCustomPlaceholder: String,
+    val aiWaiting: String,
 )
 
 // ─── English ───────────────────────────────────────────────────────
@@ -312,6 +325,19 @@ val enStrings = AppStrings(
     notificationChannelDesc = "Keeps connection to server alive",
     todoCompleted = "Tasks Completed",
     todoCompletedDesc = "%s's task list is completed",
+
+    // Permission/Question bubbles
+    permissionRequired = "Permission Required",
+    permissionAllowOnce = "Allow Once",
+    permissionAllowAlways = "Always Allow",
+    permissionReject = "Reject",
+    permissionRejectReason = "Reject reason (optional)",
+    permissionConfirmTitle = "%s wants to %s %s",
+    questionTitle = "Question",
+    questionSubmit = "Submit",
+    questionDismiss = "Dismiss",
+    questionCustomPlaceholder = "Type your answer...",
+    aiWaiting = "AI waiting for your response...",
 )
 
 // ─── Chinese ───────────────────────────────────────────────────────
@@ -461,4 +487,17 @@ val zhStrings = AppStrings(
     notificationChannelDesc = "保持与服务器的连接",
     todoCompleted = "任务完成",
     todoCompletedDesc = "%s的任务列表已完成",
+
+    // Permission/Question bubbles
+    permissionRequired = "需要授权",
+    permissionAllowOnce = "允许一次",
+    permissionAllowAlways = "始终允许",
+    permissionReject = "拒绝",
+    permissionRejectReason = "拒绝原因（可选）",
+    permissionConfirmTitle = "%s 想要 %s %s",
+    questionTitle = "问题",
+    questionSubmit = "提交",
+    questionDismiss = "忽略",
+    questionCustomPlaceholder = "输入你的回答...",
+    aiWaiting = "AI 等待你的回复...",
 )

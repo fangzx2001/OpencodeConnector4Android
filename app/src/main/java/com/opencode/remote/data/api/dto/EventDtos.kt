@@ -55,4 +55,49 @@ data class EventProperties(
     val error: String? = null,
     val part: MessagePart? = null,
     val info: MessageInfoData? = null,
+    // Permission/question event fields (nullable for backward compatibility)
+    val id: String? = null,                              // request ID
+    val permission: String? = null,                      // "edit", "bash", "read", etc
+    val patterns: List<String>? = null,                  // file path patterns
+    val always: List<String>? = null,                    // always-allow patterns
+    val tool: ToolRef? = null,                           // tool reference {messageID, callID}
+    val questions: List<QuestionInfoDto>? = null,        // question definitions
+)
+
+/** Tool reference for blocking permission/question events. */
+@Serializable
+data class ToolRef(
+    val messageID: String? = null,
+    @SerialName("callID")
+    val callID: String? = null,
+)
+
+/** Option within a question.asked event. */
+@Serializable
+data class QuestionOptionDto(
+    val label: String = "",
+    val description: String? = null,
+)
+
+/** Single question in a question.asked event. */
+@Serializable
+data class QuestionInfoDto(
+    val question: String = "",
+    val header: String? = null,
+    val options: List<QuestionOptionDto> = emptyList(),
+    val multiple: Boolean = false,
+    val custom: Boolean = false,
+)
+
+/** Reply payload for POST /permission/:id/reply */
+@Serializable
+data class PermissionReplyPayload(
+    val reply: String,  // "once", "always", "reject"
+    val message: String? = null,
+)
+
+/** Reply payload for POST /question/:id/reply */
+@Serializable
+data class QuestionReplyPayload(
+    val answers: List<List<String>>,
 )
