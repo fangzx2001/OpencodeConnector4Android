@@ -45,7 +45,7 @@ interface OConnectorRepository {
 
     // ─── Message Operations ──────────────────────────────────────────
 
-    suspend fun getMessages(sessionId: String, directory: String? = null): List<MessageInfo>
+    suspend fun getMessages(sessionId: String, directory: String? = null, limit: Int? = null): List<MessageInfo>
     suspend fun sendMessage(sessionId: String, message: String, agent: String? = null, directory: String? = null)
 
     // ─── Permission / Question Replies ──────────────────────────────
@@ -113,7 +113,9 @@ class OConnectorRepositoryImpl @Inject constructor(
 
     private var connected = false
     private var cachedAgents: List<AgentInfo>? = null
+    private var agentsCacheTime: Long = 0
     private var cachedModels: List<ModelInfo>? = null
+    private var modelsCacheTime: Long = 0
 
     override var activeSessionId: String? = null
     override var activeSessionDirectory: String? = null
@@ -145,6 +147,8 @@ class OConnectorRepositoryImpl @Inject constructor(
         connected = false
         cachedAgents = null
         cachedModels = null
+        agentsCacheTime = 0
+        modelsCacheTime = 0
         activeSessionId = null
         activeSessionDirectory = null
     }
@@ -179,8 +183,8 @@ class OConnectorRepositoryImpl @Inject constructor(
 
     // ─── Message Operations ──────────────────────────────────────────
 
-    override suspend fun getMessages(sessionId: String, directory: String?): List<MessageInfo> =
-        requireClient().getMessages(sessionId, directory)
+    override suspend fun getMessages(sessionId: String, directory: String?, limit: Int?): List<MessageInfo> =
+        requireClient().getMessages(sessionId, directory, limit)
 
     override suspend fun sendMessage(sessionId: String, message: String, agent: String?, directory: String?) =
         requireClient().sendMessage(sessionId, message, agent, directory)
@@ -217,10 +221,14 @@ class OConnectorRepositoryImpl @Inject constructor(
     // ─── Agents ─────────────────────────────────────────────────────────
 
     override suspend fun listAgents(): List<AgentInfo> {
-        cachedAgents?.let { return it }
+        // Return cache if valid (within 30s TTL)
+        if (cachedAgents != null && System.currentTimeMillis() - agentsCacheTime < 30_000) {
+            return cachedAgents!!
+        }
         val agents = requireClient().listAgents()
             .filter { it.mode != "subagent" && !it.hidden }
         cachedAgents = agents
+        agentsCacheTime = System.currentTimeMillis()
         return agents
     }
 
@@ -235,9 +243,13 @@ class OConnectorRepositoryImpl @Inject constructor(
     // ─── Config / Providers ─────────────────────────────────────────────
 
     override suspend fun listProviders(): ProviderList {
-        cachedModels?.let { return ProviderList() }
+        // Return cache if valid (within 30s TTL)
+        if (cachedModels != null && System.currentTimeMillis() - modelsCacheTime < 30_000) {
+            return ProviderList()
+        }
         val providers = requireClient().listProviders()
         cachedModels = providers.providers.flatMap { it.models }
+        modelsCacheTime = System.currentTimeMillis()
         return providers
     }
 

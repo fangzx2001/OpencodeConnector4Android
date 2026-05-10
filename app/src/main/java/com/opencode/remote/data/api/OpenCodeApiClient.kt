@@ -206,9 +206,9 @@ class OConnectorApiClient @Inject constructor(
      * The OpenCode server supports ?limit=N (cursor-based pagination).
      * Without it, ALL messages including huge tool outputs are returned → OOM.
      */
-    suspend fun getMessages(id: String, directory: String? = null): List<MessageInfo> {
+    suspend fun getMessages(id: String, directory: String? = null, limit: Int? = null): List<MessageInfo> {
         val messages = client.get("/session/$id/message") {
-            parameter("limit", MAX_MESSAGES)
+            parameter("limit", limit ?: MAX_MESSAGES)
             directory?.let {
                 parameter("directory", it)
                 header("x-opencode-directory", encDir(it))

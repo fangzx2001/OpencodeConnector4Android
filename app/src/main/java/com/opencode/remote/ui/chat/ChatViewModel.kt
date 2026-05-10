@@ -16,6 +16,8 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.*
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
@@ -138,6 +140,7 @@ class ChatViewModel @Inject constructor(
     val uiState: StateFlow<ChatUiState> = _uiState.asStateFlow()
 
     private var sseJob: Job? = null
+    private var pollingJob: Job? = null
 
     /**
      * IDs of messages that already completed — guards against late [message.updated] re-triggering streaming.
@@ -154,6 +157,8 @@ class ChatViewModel @Inject constructor(
      *  subsequent message.part.delta events that may arrive with field=null. */
     private val partTypeMap = mutableMapOf<String?, String>()
     private var deltaLogCounter = 0
+    private var pendingDeltas = mutableListOf<ServerEvent>()  // accumulated delta events for 16ms batching
+    private var batchFlushJob: Job? = null  // debounce job for 16ms coalescing window
 
     companion object {
         private const val TAG = "ChatViewModel"
@@ -173,6 +178,7 @@ class ChatViewModel @Inject constructor(
      * This ordering ensures the UI never flashes between empty/streaming/idle states.
      */
     fun initialize(sessionId: String, directory: String? = null) {
+        pollingJob?.cancel()
         _uiState.update { it.copy(sessionMeta = it.sessionMeta.copy(sessionId = sessionId, sessionDirectory = directory)) }
 
         // Track active session for notification deep link
@@ -251,6 +257,8 @@ class ChatViewModel @Inject constructor(
                 if (turnCompleted) {
                     // Turn finished while user was away — clear stale streaming state
                     Log.d(TAG, "Turn completed while away, clearing streaming state")
+                    batchFlushJob?.cancel()
+                    synchronized(pendingDeltas) { pendingDeltas.clear() }
                     repository.clearStreaming()
                     _uiState.update { it.copy(chatDisplay = it.chatDisplay.copy(messages = messages, isLoading = false)) }
                 } else {
@@ -282,6 +290,9 @@ class ChatViewModel @Inject constructor(
             // This eliminates race conditions where stale SSE events arrive
             // before streaming state is set, causing premature clearing.
             subscribeToEvents()
+
+            // Start message polling (3s interval, skips during streaming)
+            startMessagePolling(initSessionId)
         }
     }
 
@@ -344,6 +355,8 @@ class ChatViewModel @Inject constructor(
             } catch (e: Exception) {
                 if (e !is CancellationException) {
                     Log.e(TAG, "SSE event stream error", e)
+                    batchFlushJob?.cancel()
+                    synchronized(pendingDeltas) { pendingDeltas.clear() }
                     repository.clearStreaming()
                     val s = com.opencode.remote.ui.strings.AppLocale.strings
                     _uiState.update { it.copy(chatDisplay = it.chatDisplay.copy(error = s.errStreamInterrupted.replace("%s", e.localizedMessage ?: e.javaClass.simpleName))) }
@@ -364,23 +377,16 @@ class ChatViewModel @Inject constructor(
         when (event.payload.type) {
             // ── Streaming text delta (incremental) ──
             "message.part.delta" -> {
-                val chunk = props.delta ?: return
-                val cachedType = partTypeMap[props.partID]
-                val segType = when {
-                    cachedType != null -> cachedType
-                    props.field == "reasoning" -> "thinking"
-                    else -> "text"
+                // Accumulate delta events for batch processing (16ms coalescing window)
+                synchronized(pendingDeltas) {
+                    pendingDeltas.add(event)
                 }
-                val callId = props.callID
-                val segments = _uiState.value.streamingSegments
-                val updated = appendToLastSegment(segments, segType, chunk, id = callId)
-                repository.setStreamingBlocks(updated)  // stores segments now
-                deltaLogCounter++
-                if (deltaLogCounter % 50 == 0) {
-                    Log.d(TAG, "delta #$deltaLogCounter field=${props.field} type=$segType segs=${updated.size}")
-                }
-                _uiState.update {
-                    it.copy(streaming = it.streaming.copy(isStreaming = true, isSending = false, streamingSegments = updated))
+                // Start batch flush if not already scheduled
+                if (batchFlushJob?.isActive != true) {
+                    batchFlushJob = viewModelScope.launch {
+                        delay(16)  // Coalesce window: ~1 frame at 60fps
+                        flushPendingDeltas()
+                    }
                 }
             }
 
@@ -452,6 +458,24 @@ class ChatViewModel @Inject constructor(
                             ),
                         )
                     }
+                } else {
+                    // Non-assistant roles (e.g. user) — add to local list incrementally via SSE
+                    val msgId = info.id ?: return
+                    val currentMessages = _uiState.value.messages
+                    // Skip if message already exists (by ID)
+                    if (currentMessages.any { it.id == msgId }) return
+                    // Also skip optimistic local messages (prefixed with "local_")
+                    if (msgId.startsWith("local_")) return
+                    Log.d(TAG, "Incremental SSE: adding ${info.role} message ${msgId.take(8)}")
+                    // Fetch messages to replace the optimistic local placeholder with real data
+                    viewModelScope.launch {
+                        try {
+                            val allMessages = repository.getMessages(_uiState.value.sessionId, _uiState.value.sessionDirectory)
+                            _uiState.update { it.copy(chatDisplay = it.chatDisplay.copy(messages = allMessages)) }
+                        } catch (e: Exception) {
+                            Log.w(TAG, "Failed to fetch messages after user message.updated", e)
+                        }
+                    }
                 }
             }
 
@@ -486,15 +510,11 @@ class ChatViewModel @Inject constructor(
                     }
                     deltaLogCounter = 0
                     partTypeMap.clear()
+                    batchFlushJob?.cancel()
+                    synchronized(pendingDeltas) { pendingDeltas.clear() }
                     repository.clearStreaming()
 
                     viewModelScope.launch {
-                        try {
-                            val messages = repository.getMessages(_uiState.value.sessionId, _uiState.value.sessionDirectory)
-                            _uiState.update { it.copy(chatDisplay = it.chatDisplay.copy(messages = messages)) }
-                        } catch (e: Exception) {
-                            Log.e(TAG, "Failed to reload messages after session.idle", e)
-                        }
                         loadTodoList()
                         updateContextUsage()
                     }
@@ -570,6 +590,8 @@ class ChatViewModel @Inject constructor(
             "session.error" -> {
                 val errorMsg = props.error ?: com.opencode.remote.ui.strings.AppLocale.strings.errUnknown
                 Log.e(TAG, "Session error: $errorMsg")
+                batchFlushJob?.cancel()
+                synchronized(pendingDeltas) { pendingDeltas.clear() }
                 repository.clearStreaming()
                 _uiState.update {
                     it.copy(
@@ -609,6 +631,39 @@ class ChatViewModel @Inject constructor(
             chunk.take(MAX_STREAMING_TEXT) + "\n\n… [truncated]"
         } else chunk
         return segments + ResponseSegment(type = type, text = safeChunk, isStreaming = true, id = id)
+    }
+
+    /** Flush all accumulated delta events in a single batch UI update. */
+    private fun flushPendingDeltas() {
+        val batch: List<ServerEvent>
+        synchronized(pendingDeltas) {
+            batch = pendingDeltas.toList()
+            pendingDeltas.clear()
+        }
+        if (batch.isEmpty()) return
+
+        // Process all accumulated deltas in a single UI update
+        for (deltaEvent in batch) {
+            val p = deltaEvent.payload.properties
+            val chunk = p.delta ?: continue
+            val cachedType = partTypeMap[p.partID]
+            val segType = when {
+                cachedType != null -> cachedType
+                p.field == "reasoning" -> "thinking"
+                else -> "text"
+            }
+            val callId = p.callID
+            val segments = _uiState.value.streamingSegments
+            val updated = appendToLastSegment(segments, segType, chunk, id = callId)
+            repository.setStreamingBlocks(updated)
+            deltaLogCounter++
+            if (deltaLogCounter % 50 == 0) {
+                Log.d(TAG, "delta #$deltaLogCounter field=${p.field} type=$segType segs=${updated.size}")
+            }
+            _uiState.update {
+                it.copy(streaming = it.streaming.copy(isStreaming = true, isSending = false, streamingSegments = updated))
+            }
+        }
     }
 
     /** Update or create a segment with full text (from part.updated). Truncates if text exceeds limit.
@@ -678,6 +733,8 @@ class ChatViewModel @Inject constructor(
                 // prompt_async returns 204 immediately — SSE events drive the rest
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to send message", e)
+                batchFlushJob?.cancel()
+                synchronized(pendingDeltas) { pendingDeltas.clear() }
                 repository.clearStreaming()
                 val s = com.opencode.remote.ui.strings.AppLocale.strings
                 _uiState.update {
@@ -694,6 +751,8 @@ class ChatViewModel @Inject constructor(
         viewModelScope.launch {
             try {
                 repository.abortSession(_uiState.value.sessionId, _uiState.value.sessionDirectory)
+                batchFlushJob?.cancel()
+                synchronized(pendingDeltas) { pendingDeltas.clear() }
                 repository.clearStreaming()
                 _uiState.update {
                     it.copy(streaming = it.streaming.copy(isSending = false, isStreaming = false, streamingAgent = null, streamingSegments = emptyList()))
@@ -886,8 +945,48 @@ class ChatViewModel @Inject constructor(
         notificationManager.notify(TODO_COMPLETED_NOTIFICATION_ID, notification)
     }
 
+    /**
+     * Launches a coroutine that polls for new messages every 3 seconds.
+     * Skips during streaming to avoid races with delta updates.
+     * Cancels itself if the session changes (stale coroutine guard).
+     */
+    private fun startMessagePolling(expectedSessionId: String) {
+        pollingJob?.cancel()
+        pollingJob = viewModelScope.launch {
+            while (isActive) {
+                delay(3000)
+                // Skip during streaming to avoid race with delta events
+                if (_uiState.value.isStreaming) continue
+                // Skip if session changed (stale coroutine guard)
+                if (_uiState.value.sessionId != expectedSessionId) break
+                try {
+                    val freshMessages = repository.getMessages(
+                        _uiState.value.sessionId,
+                        _uiState.value.sessionDirectory,
+                        limit = 5,  // Lightweight: only check latest messages
+                    )
+                    // Only update if the latest message ID differs from what we have
+                    val currentMessages = _uiState.value.messages
+                    val currentLatestId = currentMessages.lastOrNull()?.id
+                    val freshLatestId = freshMessages.lastOrNull()?.id
+                    if (freshLatestId != null && freshLatestId != currentLatestId) {
+                        Log.d(TAG, "Polling detected new message: $freshLatestId (was $currentLatestId)")
+                        // Fetch full list since there's a change
+                        val fullMessages = repository.getMessages(_uiState.value.sessionId, _uiState.value.sessionDirectory)
+                        _uiState.update { it.copy(chatDisplay = it.chatDisplay.copy(messages = fullMessages)) }
+                        updateContextUsage()
+                    }
+                } catch (e: Exception) {
+                    Log.w(TAG, "Message polling error", e)
+                }
+            }
+        }
+    }
+
     override fun onCleared() {
         super.onCleared()
+        batchFlushJob?.cancel()
+        pollingJob?.cancel()
         sseJob?.cancel()
     }
 }

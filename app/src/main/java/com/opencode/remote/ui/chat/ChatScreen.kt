@@ -33,6 +33,7 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.opencode.remote.ui.components.ErrorSnackbar
 import com.opencode.remote.ui.strings.AppLocale
+import androidx.lifecycle.compose.LifecycleResumeEffect
 import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -67,6 +68,12 @@ fun ChatScreen(
 
     LaunchedEffect(sessionId) {
         viewModel.initialize(sessionId, directory)
+    }
+
+    // Auto-refresh when navigating back to this screen
+    LifecycleResumeEffect(sessionId) {
+        viewModel.initialize(sessionId, directory)
+        onPauseOrDispose { /* no-op */ }
     }
 
     // Total items = messages + optional streaming panel + optional waiting indicator

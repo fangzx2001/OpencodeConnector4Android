@@ -10,6 +10,12 @@ import com.opencode.remote.ui.strings.AppLocale
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
+import com.opencode.remote.data.api.dto.ServerEvent
+import com.opencode.remote.data.sse.SseEventBus
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import javax.inject.Inject
 
 data class SessionsUiState(
@@ -26,6 +32,7 @@ data class SessionsUiState(
 class SessionsViewModel @Inject constructor(
     private val repository: OConnectorRepository,
     private val prefs: ConnectionPreferences,
+    private val sseEventBus: SseEventBus,
 ) : ViewModel() {
 
     private var allSessions: List<SessionInfo> = emptyList()
@@ -36,6 +43,9 @@ class SessionsViewModel @Inject constructor(
     private val _creationEvents = MutableSharedFlow<String>()
     val creationEvents: SharedFlow<String> = _creationEvents.asSharedFlow()
 
+    private var sseJob: Job? = null
+    private var pollingJob: Job? = null
+
     companion object {
         private const val TAG = "SessionsViewModel"
     }
@@ -45,6 +55,8 @@ class SessionsViewModel @Inject constructor(
         loadProjectName()
         observeDarkMode()
         observeHideChildSessions()
+        subscribeToSseEvents()
+        startSessionsPolling()
     }
 
     private fun observeDarkMode() {
@@ -162,5 +174,42 @@ class SessionsViewModel @Inject constructor(
 
     fun clearError() {
         _uiState.update { it.copy(error = null) }
+    }
+
+    private fun subscribeToSseEvents() {
+        sseJob = viewModelScope.launch {
+            try {
+                sseEventBus.events.collect { event ->
+                    val type = event.payload.type
+                    if (type == "session.updated" || type == "session.created") {
+                        Log.d(TAG, "SSE session event: $type, refreshing sessions")
+                        loadSessions()
+                    }
+                }
+            } catch (e: Exception) {
+                if (e !is CancellationException) {
+                    Log.w(TAG, "SSE subscription error in SessionsViewModel", e)
+                }
+            }
+        }
+    }
+
+    private fun startSessionsPolling() {
+        pollingJob = viewModelScope.launch {
+            while (isActive) {
+                delay(30_000)  // 30-second interval (listAllSessions is expensive)
+                try {
+                    loadSessions()
+                } catch (e: Exception) {
+                    Log.w(TAG, "Sessions polling error", e)
+                }
+            }
+        }
+    }
+
+    override fun onCleared() {
+        super.onCleared()
+        sseJob?.cancel()
+        pollingJob?.cancel()
     }
 }

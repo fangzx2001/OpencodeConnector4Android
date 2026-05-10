@@ -15,6 +15,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.channelFlow
 import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
 import kotlinx.serialization.json.Json
 import java.io.IOException
 import javax.inject.Inject
@@ -107,6 +108,21 @@ class OConnectorSseClient @Inject constructor(
         var terminalError: IOException? = null
 
         while (isActive) {
+            // Heartbeat timeout tracking — 45s without any SSE line triggers reconnect
+            var lastEventTimeMs = System.currentTimeMillis()
+            var sseChannel: ByteReadChannel? = null
+            val heartbeatJob = launch {
+                while (isActive) {
+                    delay(5000)
+                    val elapsed = System.currentTimeMillis() - lastEventTimeMs
+                    if (elapsed > 45_000) {
+                        Log.w(TAG, "SSE heartbeat timeout: ${elapsed}ms since last event, reconnecting")
+                        sseChannel?.cancel()
+                        return@launch
+                    }
+                }
+            }
+
             try {
                 val sseUrl = "$baseUrl/global/event"
                 sseClient.prepareGet(sseUrl) {
@@ -117,6 +133,7 @@ class OConnectorSseClient @Inject constructor(
                     }
                 }.execute { response ->
                     val channel: ByteReadChannel = response.bodyAsChannel()
+                    sseChannel = channel
 
                     while (!channel.isClosedForRead) {
                         val line = try {
@@ -130,6 +147,7 @@ class OConnectorSseClient @Inject constructor(
 
                         // Only process "data:" lines — each is a complete JSON event
                         if (line.startsWith("data:")) {
+                            lastEventTimeMs = System.currentTimeMillis()
                             val jsonStr = line.removePrefix("data:").trim()
                             if (jsonStr.isNotEmpty()) {
                                 try {
@@ -139,6 +157,10 @@ class OConnectorSseClient @Inject constructor(
                                     Log.w(TAG, "Failed to parse SSE event: $jsonStr", e)
                                 }
                             }
+                        }
+                        // Update heartbeat on any SSE comment line too (server sends ": ping")
+                        if (line.startsWith(":")) {
+                            lastEventTimeMs = System.currentTimeMillis()
                         }
                         // Empty lines are SSE event separators — ignore
                         // "event:" lines are optional — we parse type from JSON payload
@@ -152,6 +174,9 @@ class OConnectorSseClient @Inject constructor(
             } catch (e: Exception) {
                 Log.e(TAG, "SSE stream error: ${e.message}")
                 if (!autoReconnect || !isActive) break
+            } finally {
+                heartbeatJob.cancel()
+                sseChannel = null
             }
 
             // Shared reconnect logic for both normal disconnect and error
