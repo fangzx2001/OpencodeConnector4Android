@@ -340,7 +340,7 @@ fun ConnectionScreen(
                     DownloadHelper.downloadApk(
                         context,
                         avail.downloadUrl,
-                        "OConnector-v${avail.version}.apk"
+                        "OConnector-X-v${avail.version}.apk"
                     )
                     Toast.makeText(context, "Download started", Toast.LENGTH_SHORT).show()
                 } else {

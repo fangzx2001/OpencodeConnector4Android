@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">OConnector alpha</string>
+    <string name="app_name">OConnector X</string>
     <string name="connection_title">连接服务器</string>
     <string name="host_label">服务器地址</string>
     <string name="port_label">端口</string>
