@@ -118,6 +118,7 @@ data class MessageInfoData(
     val modelID: String? = null,
     @SerialName("modelId")
     val modelId: String? = null,
+    val variant: String? = null,
     val model: MessageModel? = null,
     val time: MessageTime? = null,
     val finish: String? = null,
@@ -128,6 +129,7 @@ data class MessageInfoData(
 ) {
     val resolvedProviderID: String? get() = model?.resolvedProviderID ?: providerID ?: providerId
     val resolvedModelID: String? get() = model?.resolvedModelID ?: modelID ?: modelId
+    val resolvedVariant: String? get() = model?.variant ?: variant
 }
 
 @Serializable
@@ -140,6 +142,7 @@ data class MessageModel(
     val modelID: String? = null,
     @SerialName("modelId")
     val modelId: String? = null,
+    val variant: String? = null,
 ) {
     val resolvedProviderID: String? get() = providerID ?: providerId
     val resolvedModelID: String? get() = modelID ?: modelId
@@ -225,6 +228,16 @@ data class ToolState(
 data class SendMessageRequest(
     val parts: List<SendMessagePart>,
     val agent: String? = null,
+    val model: SendMessageModelRef? = null,
+    val variant: String? = null,
+)
+
+@Serializable
+data class SendMessageModelRef(
+    @SerialName("providerID")
+    val providerID: String,
+    @SerialName("modelID")
+    val modelID: String,
 )
 
 @Serializable

@@ -50,7 +50,14 @@ interface OConnectorRepository {
     // ─── Message Operations ──────────────────────────────────────────
 
     suspend fun getMessages(sessionId: String, directory: String? = null): List<MessageInfo>
-    suspend fun sendMessage(sessionId: String, message: String, agent: String? = null, directory: String? = null)
+    suspend fun sendMessage(
+        sessionId: String,
+        message: String,
+        agent: String? = null,
+        model: SendMessageModelRef? = null,
+        variant: String? = null,
+        directory: String? = null,
+    )
 
     // ─── Todo ────────────────────────────────────────────────────────
 
@@ -67,7 +74,7 @@ interface OConnectorRepository {
 
     // ─── Agents ─────────────────────────────────────────────────────────
 
-    suspend fun listAgents(): List<AgentInfo>
+    suspend fun listAgents(directory: String? = null): List<AgentInfo>
     fun getCachedAgents(): List<AgentInfo>
     suspend fun listProviders(): List<ProviderInfo>
     fun getCachedProviders(): List<ProviderInfo>
@@ -181,8 +188,14 @@ class OConnectorRepositoryImpl @Inject constructor(
     override suspend fun getMessages(sessionId: String, directory: String?): List<MessageInfo> =
         requireClient().getMessages(sessionId, directory)
 
-    override suspend fun sendMessage(sessionId: String, message: String, agent: String?, directory: String?) =
-        requireClient().sendMessage(sessionId, message, agent, directory)
+    override suspend fun sendMessage(
+        sessionId: String,
+        message: String,
+        agent: String?,
+        model: SendMessageModelRef?,
+        variant: String?,
+        directory: String?,
+    ) = requireClient().sendMessage(sessionId, message, agent, model, variant, directory)
 
     // ─── Todo ────────────────────────────────────────────────────────
 
@@ -204,11 +217,14 @@ class OConnectorRepositoryImpl @Inject constructor(
 
     // ─── Agents ─────────────────────────────────────────────────────────
 
-    override suspend fun listAgents(): List<AgentInfo> {
-        cachedAgents?.let { return it }
-        val agents = requireClient().listAgents()
-            .filter { !it.hidden }
-        cachedAgents = agents
+    override suspend fun listAgents(directory: String?): List<AgentInfo> {
+        if (directory == null) {
+            cachedAgents?.let { return it }
+        }
+        val agents = requireClient().listAgents(directory)
+        if (directory == null) {
+            cachedAgents = agents
+        }
         return agents
     }
 

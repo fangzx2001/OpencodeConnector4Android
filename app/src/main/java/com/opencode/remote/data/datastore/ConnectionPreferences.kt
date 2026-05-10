@@ -31,6 +31,11 @@ data class ConnectionConfig(
     val autoReconnect: Boolean = true,
 )
 
+data class StoredModelSelection(
+    val providerId: String,
+    val modelId: String,
+)
+
 @Singleton
 class ConnectionPreferences @Inject constructor(
     @ApplicationContext private val context: Context,
@@ -248,6 +253,60 @@ class ConnectionPreferences @Inject constructor(
             context.dataStore.data.first()[stringPreferencesKey("selected_agent_$sessionId")]
         } catch (e: Exception) {
             Log.e(TAG, "Failed to read selected agent", e)
+            null
+        }
+    }
+
+    suspend fun saveSelectedModel(sessionId: String, model: StoredModelSelection?) {
+        try {
+            context.dataStore.edit {
+                val key = stringPreferencesKey("selected_model_$sessionId")
+                if (model == null) {
+                    it.remove(key)
+                } else {
+                    it[key] = "${model.providerId}/${model.modelId}"
+                }
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to save selected model", e)
+        }
+    }
+
+    suspend fun getSelectedModel(sessionId: String): StoredModelSelection? {
+        return try {
+            val raw = context.dataStore.data.first()[stringPreferencesKey("selected_model_$sessionId")] ?: return null
+            val slashIndex = raw.indexOf('/')
+            if (slashIndex <= 0 || slashIndex >= raw.lastIndex) return null
+            StoredModelSelection(
+                providerId = raw.substring(0, slashIndex),
+                modelId = raw.substring(slashIndex + 1),
+            )
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to read selected model", e)
+            null
+        }
+    }
+
+    suspend fun saveSelectedVariant(sessionId: String, variant: String?) {
+        try {
+            context.dataStore.edit {
+                val key = stringPreferencesKey("selected_variant_$sessionId")
+                if (variant.isNullOrBlank()) {
+                    it.remove(key)
+                } else {
+                    it[key] = variant
+                }
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to save selected variant", e)
+        }
+    }
+
+    suspend fun getSelectedVariant(sessionId: String): String? {
+        return try {
+            context.dataStore.data.first()[stringPreferencesKey("selected_variant_$sessionId")]
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to read selected variant", e)
             null
         }
     }

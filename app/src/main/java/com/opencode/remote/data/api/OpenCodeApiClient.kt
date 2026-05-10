@@ -29,6 +29,7 @@ import javax.net.ssl.SSLContext
 import javax.net.ssl.X509TrustManager
 import java.security.cert.X509Certificate
 import javax.net.ssl.TrustManager
+import kotlin.time.Duration.Companion.minutes
 
 /**
  * REST API client for OpenCode server v1.14.x
@@ -44,7 +45,8 @@ import javax.net.ssl.TrustManager
  *   POST /session/{id}/share        → SessionInfo
  *   DELETE /session/{id}/share      → SessionInfo
  *   GET  /session/{id}/message      → List<MessageInfo>
- *   POST /session/{id}/prompt_async → 204 No Content (async, AI output via SSE)
+ *   POST /session/{id}/message      → preferred send route on newer OpenCode builds
+ *   POST /session/{id}/prompt_async → legacy async send route kept for compatibility
  *   GET  /session/{id}/todo         → List<TodoItem>
  *   GET  /provider                  → ProvidersResponseDto
  *   GET  /project/current           → ProjectInfo
@@ -91,6 +93,8 @@ class OConnectorApiClient @Inject constructor(
         private const val TAG = "OConnectorApiClient"
         /** Maximum number of messages to load from server. Prevents OOM on long sessions. */
         private const val MAX_MESSAGES = 50
+        /** Message send may legitimately stay open while the server starts processing. */
+        private val SEND_MESSAGE_TIMEOUT_MS = 3.minutes.inWholeMilliseconds
     }
 
     /**
@@ -280,19 +284,67 @@ class OConnectorApiClient @Inject constructor(
     }
 
     /**
-     * POST /session/{id}/prompt_async — 异步发送（HTTP 204, 立即返回）
-     * Body: {"parts":[{"type":"text","text":"user message"}],"agent":"optional"}
-     * AI 生成通过 SSE 事件流实时推送（message.part.delta, message.completed)
+     * Send a user message using the newest known route first, then fall back
+     * to the legacy async endpoint when talking to older servers.
+     *
+     * Newer OpenCode builds prefer POST /session/{id}/message with a parts[] body.
+     * Older builds may still only support POST /session/{id}/prompt_async.
+     *
+     * In both cases the Android client still treats SSE as the source of truth
+     * for streaming assistant output and turn completion.
      */
-    suspend fun sendMessage(sessionId: String, text: String, agent: String? = null, directory: String? = null) {
-        client.post("/session/$sessionId/prompt_async") {
-            setBody(SendMessageRequest(parts = listOf(SendMessagePart(text = text)), agent = agent))
-            directory?.let {
-                parameter("directory", it)
-                header("x-opencode-directory", encDir(it))
+    suspend fun sendMessage(
+        sessionId: String,
+        text: String,
+        agent: String? = null,
+        model: SendMessageModelRef? = null,
+        variant: String? = null,
+        directory: String? = null,
+    ) {
+        val request = SendMessageRequest(
+            parts = listOf(SendMessagePart(text = text)),
+            agent = agent,
+            model = model,
+            variant = variant,
+        )
+
+        try {
+            client.post("/session/$sessionId/message") {
+                applyMessageSendRequestOptions(directory)
+                setBody(request)
             }
+            Log.d(TAG, "Sent message via /session/$sessionId/message")
+            return
+        } catch (e: ResponseException) {
+            if (!shouldFallbackToLegacyPromptAsync(e.response.status)) throw e
+            Log.w(
+                TAG,
+                "Send via /session/$sessionId/message not supported (${e.response.status}), falling back to /prompt_async",
+            )
+        }
+
+        client.post("/session/$sessionId/prompt_async") {
+            applyMessageSendRequestOptions(directory)
+            setBody(request)
+        }
+        Log.d(TAG, "Sent message via legacy /session/$sessionId/prompt_async")
+    }
+
+    private fun HttpRequestBuilder.applyMessageSendRequestOptions(directory: String?) {
+        timeout {
+            requestTimeoutMillis = SEND_MESSAGE_TIMEOUT_MS
+            socketTimeoutMillis = SEND_MESSAGE_TIMEOUT_MS
+        }
+        directory?.let {
+            parameter("directory", it)
+            header("x-opencode-directory", encDir(it))
         }
     }
+
+    private fun shouldFallbackToLegacyPromptAsync(status: HttpStatusCode): Boolean =
+        status == HttpStatusCode.NotFound ||
+            status == HttpStatusCode.MethodNotAllowed ||
+            status == HttpStatusCode.NotImplemented
 
     // ─── Todo ──────────────────────────────────────────────────────────
 
@@ -386,9 +438,41 @@ class OConnectorApiClient @Inject constructor(
 
     // ─── Agents ─────────────────────────────────────────────────────────
 
-    /** GET /agent → returns array of available agents */
-    suspend fun listAgents(): List<AgentInfo> =
-        client.get("/agent").body<List<AgentInfo>>()
+    /** GET /agent → returns available agents; scope by directory when provided */
+    suspend fun listAgents(directory: String? = null): List<AgentInfo> {
+        val raw = client.get("/agent") {
+            directory?.let {
+                parameter("directory", it)
+                header("x-opencode-directory", encDir(it))
+            }
+        }.body<String>()
+        return parseAgentsResponse(raw)
+    }
+
+    private fun parseAgentsResponse(raw: String): List<AgentInfo> {
+        val element = json.decodeFromString<JsonElement>(raw)
+        return when (element) {
+            is JsonArray -> element.mapNotNull(::parseAgentInfo)
+            is JsonObject -> parseAgentList(element["agents"])
+                .ifEmpty { parseAgentList(element["items"]) }
+                .ifEmpty { parseAgentList(element["data"]) }
+            else -> emptyList()
+        }
+    }
+
+    private fun parseAgentList(element: JsonElement?): List<AgentInfo> =
+        (element as? JsonArray)?.mapNotNull(::parseAgentInfo).orEmpty()
+
+    private fun parseAgentInfo(element: JsonElement): AgentInfo? {
+        val obj = element as? JsonObject ?: return null
+        val name = obj["name"]?.jsonPrimitive?.contentOrNull ?: return null
+        return AgentInfo(
+            name = name,
+            mode = obj["mode"]?.jsonPrimitive?.contentOrNull,
+            description = obj["description"]?.jsonPrimitive?.contentOrNull,
+            hidden = obj["hidden"]?.jsonPrimitive?.contentOrNull?.toBooleanStrictOrNull() ?: false,
+        )
+    }
 
     /** GET /provider → returns providers and model limits */
     suspend fun listProviders(): ProvidersResponseDto {

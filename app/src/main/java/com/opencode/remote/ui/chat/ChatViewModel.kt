@@ -5,6 +5,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.opencode.remote.data.api.dto.*
 import com.opencode.remote.data.datastore.ConnectionPreferences
+import com.opencode.remote.data.datastore.StoredModelSelection
 import com.opencode.remote.data.repository.OConnectorRepository
 import com.opencode.remote.data.sse.SseEventBus
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -77,9 +78,7 @@ data class ChatDisplayState(
     val error: String? = null,
     val todoItems: List<TodoItem> = emptyList(),
     val showTodoPanel: Boolean = false,
-    val availableAgents: List<AgentInfo> = emptyList(),
-    val selectedAgent: String? = null,
-    val showAgentPicker: Boolean = false,
+    val selection: ChatSelectionUiState = ChatSelectionUiState(),
     val showContextDialog: Boolean = false,
     val isContextUsageLoading: Boolean = false,
     val isCompactingContext: Boolean = false,
@@ -112,9 +111,14 @@ data class ChatUiState(
     val error get() = chatDisplay.error
     val todoItems get() = chatDisplay.todoItems
     val showTodoPanel get() = chatDisplay.showTodoPanel
-    val availableAgents get() = chatDisplay.availableAgents
-    val selectedAgent get() = chatDisplay.selectedAgent
-    val showAgentPicker get() = chatDisplay.showAgentPicker
+    val selection get() = chatDisplay.selection
+    val availableAgents get() = selection.availableAgents
+    val availableModels get() = selection.availableModels
+    val selectedAgent get() = selection.committed.agent
+    val selectedModel get() = selection.committed.model
+    val selectedVariant get() = selection.committed.variant
+    val draftSelection get() = selection.draft
+    val showSelectionDialog get() = selection.isDialogOpen
     val showContextDialog get() = chatDisplay.showContextDialog
     val isContextUsageLoading get() = chatDisplay.isContextUsageLoading
     val isCompactingContext get() = chatDisplay.isCompactingContext
@@ -158,6 +162,30 @@ class ChatViewModel @Inject constructor(
         private const val MAX_STREAMING_TEXT = 10_000
     }
 
+    private inline fun updateSelection(transform: (ChatSelectionUiState) -> ChatSelectionUiState) {
+        _uiState.update { current ->
+            current.copy(chatDisplay = current.chatDisplay.copy(selection = transform(current.chatDisplay.selection)))
+        }
+    }
+
+    private fun resetForFullReinitialize(sessionId: String, directory: String?) {
+        sseJob?.cancel()
+        sseJob = null
+        repository.clearStreaming()
+        completedMessageIds.clear()
+        deltaLogCounter = 0
+
+        _uiState.value = ChatUiState(
+            sessionMeta = SessionMetaState(
+                sessionId = sessionId,
+                sessionDirectory = directory,
+            ),
+            chatDisplay = ChatDisplayState(
+                isLoading = true,
+            ),
+        )
+    }
+
     /**
      * Initialize (or re-initialize) the chat session.
      *
@@ -170,12 +198,85 @@ class ChatViewModel @Inject constructor(
      * This ordering ensures the UI never flashes between empty/streaming/idle states.
      */
     fun initialize(sessionId: String, directory: String? = null) {
-        _uiState.update { it.copy(sessionMeta = it.sessionMeta.copy(sessionId = sessionId, sessionDirectory = directory)) }
+        val previousSessionId = _uiState.value.sessionId
+        _uiState.update {
+            it.copy(
+                sessionMeta = it.sessionMeta.copy(sessionId = sessionId, sessionDirectory = directory),
+                chatDisplay = it.chatDisplay.copy(
+                    selection = if (previousSessionId == sessionId) {
+                        it.chatDisplay.selection.copy(
+                            isDialogOpen = false,
+                            draft = it.chatDisplay.selection.committed,
+                        )
+                    } else {
+                        it.chatDisplay.selection.copy(
+                            isDialogOpen = false,
+                            committed = ChatSelectionConfig(),
+                            draft = ChatSelectionConfig(),
+                        )
+                    },
+                ),
+            )
+        }
 
         viewModelScope.launch {
             val savedAgent = prefs.getSelectedAgent(sessionId)
             if (!savedAgent.isNullOrBlank()) {
-                _uiState.update { it.copy(chatDisplay = it.chatDisplay.copy(selectedAgent = savedAgent)) }
+                _uiState.update { current ->
+                    if (current.sessionId == sessionId && current.selection.committed.agent.isNullOrBlank()) {
+                        current.copy(
+                            chatDisplay = current.chatDisplay.copy(
+                                selection = current.selection.copy(
+                                    committed = current.selection.committed.copy(agent = savedAgent),
+                                    draft = current.selection.draft.copy(agent = savedAgent),
+                                ),
+                            ),
+                        )
+                    } else {
+                        current
+                    }
+                }
+            }
+        }
+
+        viewModelScope.launch {
+            val savedModel = prefs.getSelectedModel(sessionId)
+            if (savedModel != null) {
+                val modelRef = ModelSelectionRef(savedModel.providerId, savedModel.modelId)
+                _uiState.update { current ->
+                    if (current.sessionId == sessionId && current.selection.committed.model == null) {
+                        current.copy(
+                            chatDisplay = current.chatDisplay.copy(
+                                selection = current.selection.copy(
+                                    committed = current.selection.committed.copy(model = modelRef),
+                                    draft = current.selection.draft.copy(model = modelRef),
+                                ),
+                            ),
+                        )
+                    } else {
+                        current
+                    }
+                }
+            }
+        }
+
+        viewModelScope.launch {
+            val savedVariant = prefs.getSelectedVariant(sessionId)
+            if (!savedVariant.isNullOrBlank()) {
+                _uiState.update { current ->
+                    if (current.sessionId == sessionId && current.selection.committed.variant.isNullOrBlank()) {
+                        current.copy(
+                            chatDisplay = current.chatDisplay.copy(
+                                selection = current.selection.copy(
+                                    committed = current.selection.committed.copy(variant = savedVariant),
+                                    draft = current.selection.draft.copy(variant = savedVariant),
+                                ),
+                            ),
+                        )
+                    } else {
+                        current
+                    }
+                }
             }
         }
 
@@ -183,7 +284,7 @@ class ChatViewModel @Inject constructor(
             val draft = prefs.getSessionDraft(sessionId)
             if (!draft.isNullOrBlank()) {
                 _uiState.update { current ->
-                    if (current.chatDisplay.inputText.isBlank()) {
+                    if (current.sessionId == sessionId && current.chatDisplay.inputText.isBlank()) {
                         current.copy(chatDisplay = current.chatDisplay.copy(inputText = draft))
                     } else {
                         current
@@ -195,7 +296,7 @@ class ChatViewModel @Inject constructor(
         // These can run in parallel — they don't affect streaming state
         loadSessionInfo()
         loadTodoList()
-        loadAgents()
+        loadAgents(directory)
         loadProviders()
 
         // Core init: load messages → check state → subscribe to SSE (sequential)
@@ -266,7 +367,7 @@ class ChatViewModel @Inject constructor(
                     Log.d(TAG, "Turn completed while away, clearing streaming state")
                     repository.clearStreaming()
                     _uiState.update { it.copy(chatDisplay = it.chatDisplay.copy(messages = messages, isLoading = false)) }
-                    syncSelectedAgentFromMessages(messages)
+                    syncSelectionFromMessages(messages)
                     refreshContextUsage(messages)
                 } else {
                     // Turn still in progress (or AI hasn't started responding yet)
@@ -277,7 +378,10 @@ class ChatViewModel @Inject constructor(
                             chatDisplay = it.chatDisplay.copy(
                                 messages = messages,
                                 isLoading = false,
-                                selectedAgent = agent ?: it.chatDisplay.selectedAgent,
+                                selection = it.selection.copy(
+                                    committed = it.selection.committed.copy(agent = agent ?: it.selection.committed.agent),
+                                    draft = it.selection.draft.copy(agent = agent ?: it.selection.draft.agent),
+                                ),
                             ),
                             streaming = it.streaming.copy(
                                 isSending = true,
@@ -288,12 +392,12 @@ class ChatViewModel @Inject constructor(
                             ),
                         )
                     }
-                    persistSelectedAgent(agent)
+                    persistSelection(_uiState.value.selection.committed)
                 }
             } else {
                 // No streaming state for this session — normal load
                 _uiState.update { it.copy(chatDisplay = it.chatDisplay.copy(messages = messages, isLoading = false)) }
-                syncSelectedAgentFromMessages(messages)
+                syncSelectionFromMessages(messages)
                 refreshContextUsage(messages)
             }
 
@@ -302,6 +406,11 @@ class ChatViewModel @Inject constructor(
             // before streaming state is set, causing premature clearing.
             subscribeToEvents()
         }
+    }
+
+    fun refreshSession(sessionId: String, directory: String? = null) {
+        resetForFullReinitialize(sessionId, directory)
+        initialize(sessionId, directory)
     }
 
     private fun loadSessionInfo() {
@@ -320,6 +429,9 @@ class ChatViewModel @Inject constructor(
                         ),
                     )
                 }
+                if (!dir.isNullOrBlank()) {
+                    loadAgents(dir)
+                }
             } catch (e: Exception) { Log.w(TAG, "Failed to load session info", e) }
         }
     }
@@ -333,11 +445,15 @@ class ChatViewModel @Inject constructor(
         }
     }
 
-    private fun loadAgents() {
+    private fun loadAgents(directory: String? = _uiState.value.sessionDirectory) {
         viewModelScope.launch {
+            val cachedAgents = repository.getCachedAgents()
+            if (directory.isNullOrBlank() && cachedAgents.isNotEmpty()) {
+                updateSelection { selection -> selection.copy(availableAgents = cachedAgents) }
+            }
             try {
-                val agents = repository.listAgents()
-                _uiState.update { it.copy(chatDisplay = it.chatDisplay.copy(availableAgents = agents)) }
+                val agents = repository.listAgents(directory?.takeIf { it.isNotBlank() })
+                updateSelection { selection -> selection.copy(availableAgents = agents) }
             } catch (e: Exception) { Log.w(TAG, "Failed to load agents", e) }
         }
     }
@@ -345,7 +461,9 @@ class ChatViewModel @Inject constructor(
     private fun loadProviders() {
         viewModelScope.launch {
             try {
-                repository.listProviders()
+                val providers = repository.listProviders()
+                val modelOptions = buildModelOptions(providers, repository.getCachedConnectedProviderIds())
+                updateSelection { selection -> normalizeSelectionState(selection.copy(availableModels = modelOptions)) }
                 refreshContextUsage(_uiState.value.messages)
             } catch (e: Exception) {
                 Log.w(TAG, "Failed to load providers", e)
@@ -399,7 +517,7 @@ class ChatViewModel @Inject constructor(
             }
 
             // ── Part state update (full text so far) ──
-            "message.part.updated" -> {
+            "message.part.updated", "message.part.update" -> {
                 val part = props.part ?: return
                 val partMessageId = part.messageID ?: return
                 val pendingId = _uiState.value.pendingAssistantMessageId ?: return
@@ -448,11 +566,9 @@ class ChatViewModel @Inject constructor(
                     }
                     Log.d(TAG, "New assistant msg: ${info.id?.take(8)} agent=${info.agent} segs=${_uiState.value.streamingSegments.size}")
                     val agentName = info.agent ?: info.mode ?: _uiState.value.streamingAgent
-                    if (!agentName.isNullOrBlank()) {
-                        _uiState.update {
-                            it.copy(chatDisplay = it.chatDisplay.copy(selectedAgent = agentName))
-                        }
-                        persistSelectedAgent(agentName)
+                    val selectionFromMessage = selectionFromMessageInfo(info, fallbackAgent = agentName)
+                    if (selectionFromMessage != null) {
+                        applyCommittedSelection(selectionFromMessage)
                     }
                     repository.setStreamingPendingMsgId(info.id)
                     _uiState.update {
@@ -521,7 +637,14 @@ class ChatViewModel @Inject constructor(
 
             // ── Todo events ──
             "todo.updated" -> {
-                loadTodoList()
+                val todosFromEvent = props.todos
+                if (todosFromEvent != null) {
+                    _uiState.update {
+                        it.copy(chatDisplay = it.chatDisplay.copy(todoItems = todosFromEvent))
+                    }
+                } else {
+                    loadTodoList()
+                }
             }
 
             // ── Internal sync (ignore) ──
@@ -586,7 +709,12 @@ class ChatViewModel @Inject constructor(
         // use its configured default (from opencode.json). DO NOT try to guess via
         // mode=="primary" — all visible agents are mode=subagent, and hidden ones
         // like "build"/"compaction" are mode=primary but are utility agents.
-        val agentName = _uiState.value.selectedAgent
+        val selection = _uiState.value.selection.committed
+        val agentName = selection.agent
+        val selectedModel = selection.model?.let {
+            SendMessageModelRef(providerID = it.providerId, modelID = it.modelId)
+        }
+        val selectedVariant = selection.variant
 
         // Clear completed IDs from previous turn — new conversation turn starting
         completedMessageIds.clear()
@@ -616,17 +744,25 @@ class ChatViewModel @Inject constructor(
                 ),
             )
         }
+        persistSessionDraft("")
 
         // 2. Fire-and-forget: send async, don't block UI
         viewModelScope.launch {
             try {
                 repository.beginStreaming(_uiState.value.sessionId, agentName)
-                repository.sendMessage(_uiState.value.sessionId, text, _uiState.value.selectedAgent, _uiState.value.sessionDirectory)
-                persistSessionDraft("")
-                // prompt_async returns 204 immediately — SSE events drive the rest
+                repository.sendMessage(
+                    sessionId = _uiState.value.sessionId,
+                    message = text,
+                    agent = agentName,
+                    model = selectedModel,
+                    variant = selectedVariant,
+                    directory = _uiState.value.sessionDirectory,
+                )
+                // REST send just kicks off the turn — SSE events still drive streaming UI
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to send message", e)
                 repository.clearStreaming()
+                persistSessionDraft(text)
                 val s = com.opencode.remote.ui.strings.AppLocale.strings
                 _uiState.update {
                     it.copy(
@@ -662,13 +798,59 @@ class ChatViewModel @Inject constructor(
         _uiState.update { it.copy(chatDisplay = it.chatDisplay.copy(showTodoPanel = !it.chatDisplay.showTodoPanel)) }
     }
 
-    fun toggleAgentPicker() {
-        _uiState.update { it.copy(chatDisplay = it.chatDisplay.copy(showAgentPicker = !it.chatDisplay.showAgentPicker)) }
+    fun openSelectionDialog() {
+        updateSelection { selection ->
+            normalizeSelectionState(
+                selection.copy(
+                    isDialogOpen = true,
+                    draft = selection.committed,
+                ),
+            )
+        }
     }
 
-    fun selectAgent(agentName: String?) {
-        _uiState.update { it.copy(chatDisplay = it.chatDisplay.copy(selectedAgent = agentName, showAgentPicker = false)) }
-        persistSelectedAgent(agentName)
+    fun dismissSelectionDialog() {
+        updateSelection { selection ->
+            selection.copy(
+                isDialogOpen = false,
+                draft = selection.committed,
+            )
+        }
+    }
+
+    fun updateDraftAgent(agentName: String?) {
+        updateSelection { selection ->
+            selection.copy(draft = selection.draft.copy(agent = agentName))
+        }
+    }
+
+    fun updateDraftModel(model: ModelSelectionRef?) {
+        updateSelection { selection ->
+            val next = selection.copy(draft = selection.draft.copy(model = model))
+            normalizeSelectionState(next)
+        }
+    }
+
+    fun updateDraftVariant(variant: String?) {
+        updateSelection { selection ->
+            val normalizedVariant = variant?.takeIf { it in selection.draftVariants }
+            selection.copy(draft = selection.draft.copy(variant = normalizedVariant))
+        }
+    }
+
+    fun confirmSelectionDialog() {
+        val committed = normalizeSelectionConfig(
+            config = _uiState.value.selection.draft,
+            options = _uiState.value.selection,
+        )
+        updateSelection { selection ->
+            selection.copy(
+                isDialogOpen = false,
+                committed = committed,
+                draft = committed,
+            )
+        }
+        persistSelection(committed)
     }
 
     fun renameCurrentSession(title: String, onSuccess: (() -> Unit)? = null) {
@@ -989,23 +1171,104 @@ class ChatViewModel @Inject constructor(
             }?.limit?.context
     }
 
-    private fun syncSelectedAgentFromMessages(messages: List<MessageInfo>) {
-        val actualAgent = messages.asReversed()
+    private fun buildModelOptions(
+        providers: List<ProviderInfo>,
+        connectedProviderIds: List<String>,
+    ): List<ModelSelectionOption> {
+        val connected = connectedProviderIds.toSet()
+        val visibleProviders = providers.filter { connected.isEmpty() || it.id in connected }
+        return visibleProviders
+            .sortedBy { it.name ?: it.id }
+            .flatMap { provider ->
+                provider.models.map { (modelKey, model) ->
+                    ModelSelectionOption(
+                        ref = ModelSelectionRef(provider.id, model.id ?: modelKey),
+                        providerName = provider.name ?: provider.id,
+                        modelName = model.name ?: model.id ?: modelKey,
+                        variants = model.variants.keys.sorted(),
+                    )
+                }
+            }
+            .sortedWith(compareBy<ModelSelectionOption> { it.providerName.lowercase() }.thenBy { it.modelName.lowercase() })
+    }
+
+    private fun normalizeSelectionState(selection: ChatSelectionUiState): ChatSelectionUiState {
+        val committed = normalizeSelectionConfig(selection.committed, selection)
+        val draftBase = selection.copy(committed = committed)
+        val draft = normalizeSelectionConfig(selection.draft, draftBase)
+        return selection.copy(committed = committed, draft = draft)
+    }
+
+    private fun normalizeSelectionConfig(
+        config: ChatSelectionConfig,
+        options: ChatSelectionUiState,
+    ): ChatSelectionConfig {
+        val model = config.model?.takeIf { options.resolveModel(it) != null }
+        val availableVariants = options.resolveModel(model)?.variants.orEmpty()
+        val variant = config.variant?.takeIf { it in availableVariants }
+        return config.copy(model = model, variant = variant)
+    }
+
+    private fun selectionFromMessageInfo(
+        info: MessageInfoData,
+        fallbackAgent: String? = null,
+    ): ChatSelectionConfig? {
+        val agent = info.agent?.takeIf { it.isNotBlank() }
+            ?: fallbackAgent?.takeIf { it.isNotBlank() }
+            ?: info.mode?.takeIf { it.isNotBlank() }
+        val providerId = info.resolvedProviderID?.takeIf { it.isNotBlank() }
+        val modelId = info.resolvedModelID?.takeIf { it.isNotBlank() }
+        val model = if (providerId != null && modelId != null) {
+            ModelSelectionRef(providerId, modelId)
+        } else {
+            null
+        }
+        val variant = info.resolvedVariant?.takeIf { it.isNotBlank() }
+        if (agent == null && model == null && variant == null) return null
+        return ChatSelectionConfig(agent = agent, model = model, variant = variant)
+    }
+
+    private fun syncSelectionFromMessages(messages: List<MessageInfo>) {
+        val resolved = messages.asReversed()
             .firstNotNullOfOrNull { message ->
                 if (message.role != "assistant") return@firstNotNullOfOrNull null
-                message.info.agent?.takeIf { it.isNotBlank() } ?: message.info.mode?.takeIf { it.isNotBlank() }
+                selectionFromMessageInfo(message.info)
             }
-        if (!actualAgent.isNullOrBlank()) {
-            _uiState.update { it.copy(chatDisplay = it.chatDisplay.copy(selectedAgent = actualAgent)) }
-            persistSelectedAgent(actualAgent)
+        if (resolved != null) {
+            applyCommittedSelection(resolved)
         }
     }
 
-    private fun persistSelectedAgent(agentName: String?) {
+    private fun applyCommittedSelection(update: ChatSelectionConfig) {
+        updateSelection { selection ->
+            normalizeSelectionState(
+                selection.copy(
+                    committed = selection.committed.copy(
+                        agent = update.agent ?: selection.committed.agent,
+                        model = update.model ?: selection.committed.model,
+                        variant = update.variant ?: selection.committed.variant,
+                    ),
+                    draft = selection.draft.copy(
+                        agent = update.agent ?: selection.draft.agent,
+                        model = update.model ?: selection.draft.model,
+                        variant = update.variant ?: selection.draft.variant,
+                    ),
+                ),
+            )
+        }
+        persistSelection(_uiState.value.selection.committed)
+    }
+
+    private fun persistSelection(selection: ChatSelectionConfig) {
         val sessionId = _uiState.value.sessionId
         if (sessionId.isBlank()) return
         viewModelScope.launch {
-            prefs.saveSelectedAgent(sessionId, agentName)
+            prefs.saveSelectedAgent(sessionId, selection.agent)
+            prefs.saveSelectedModel(
+                sessionId,
+                selection.model?.let { StoredModelSelection(providerId = it.providerId, modelId = it.modelId) },
+            )
+            prefs.saveSelectedVariant(sessionId, selection.variant)
         }
     }
 

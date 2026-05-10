@@ -2,6 +2,7 @@ package com.opencode.remote.data.api.dto
 
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.JsonElement
 
 /**
  * 实际 API: GET /project/current
@@ -64,6 +65,7 @@ data class ProviderModelInfo(
     val id: String? = null,
     val name: String? = null,
     val limit: ModelLimitInfo? = null,
+    val variants: Map<String, JsonElement> = emptyMap(),
 )
 
 @Serializable
