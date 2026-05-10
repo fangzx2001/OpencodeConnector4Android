@@ -4,6 +4,8 @@ import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.opencode.remote.data.api.dto.*
+import com.opencode.remote.data.datastore.ConnectionPreferences
+import com.opencode.remote.data.datastore.StoredModelSelection
 import com.opencode.remote.data.repository.OConnectorRepository
 import com.opencode.remote.data.sse.SseEventBus
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -12,6 +14,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import javax.inject.Inject
+import kotlin.math.roundToInt
 
 /** A single segment in the streaming or completed assistant response. */
 data class ResponseSegment(
@@ -21,12 +24,41 @@ data class ResponseSegment(
     val id: String? = null,  // callID for tool segments, null for text/thinking — prevents tool calls from overwriting each other
 )
 
+data class ContextUsageState(
+    val usagePercent: Int?,
+    val totalTokens: Int,
+    val totalCost: Double,
+    val modelLimit: Int?,
+)
+
+data class ContextTokenBreakdown(
+    val inputTokens: Int,
+    val outputTokens: Int,
+    val reasoningTokens: Int,
+    val cacheReadTokens: Int,
+    val cacheWriteTokens: Int,
+)
+
+data class ContextUsageDetailState(
+    val usagePercent: Int?,
+    val totalTokens: Int,
+    val totalCost: Double,
+    val latestMessageCost: Double,
+    val modelLimit: Int?,
+    val providerId: String?,
+    val modelId: String?,
+    val latestMessageId: String,
+    val latestCompletedAt: Long?,
+    val breakdown: ContextTokenBreakdown,
+)
+
 /** Session metadata — changes infrequently (init, session events). */
 data class SessionMetaState(
     val sessionId: String = "",
     val sessionDirectory: String? = null,
     val sessionTitle: String? = null,
     val sessionStatus: String? = null,
+    val contextUsage: ContextUsageState? = null,
 )
 
 /** Streaming UI state — changes rapidly during AI response (text deltas, agent info). */
@@ -46,9 +78,13 @@ data class ChatDisplayState(
     val error: String? = null,
     val todoItems: List<TodoItem> = emptyList(),
     val showTodoPanel: Boolean = false,
-    val availableAgents: List<AgentInfo> = emptyList(),
-    val selectedAgent: String? = null,
-    val showAgentPicker: Boolean = false,
+    val selection: ChatSelectionUiState = ChatSelectionUiState(),
+    val showContextDialog: Boolean = false,
+    val isContextUsageLoading: Boolean = false,
+    val isCompactingContext: Boolean = false,
+    val contextUsageError: String? = null,
+    val contextUsageMessage: String? = null,
+    val contextUsageDetail: ContextUsageDetailState? = null,
 )
 
 data class ChatUiState(
@@ -61,6 +97,7 @@ data class ChatUiState(
     val sessionDirectory get() = sessionMeta.sessionDirectory
     val sessionTitle get() = sessionMeta.sessionTitle
     val sessionStatus get() = sessionMeta.sessionStatus
+    val contextUsage get() = sessionMeta.contextUsage
 
     val isStreaming get() = streaming.isStreaming
     val isSending get() = streaming.isSending
@@ -74,14 +111,31 @@ data class ChatUiState(
     val error get() = chatDisplay.error
     val todoItems get() = chatDisplay.todoItems
     val showTodoPanel get() = chatDisplay.showTodoPanel
-    val availableAgents get() = chatDisplay.availableAgents
-    val selectedAgent get() = chatDisplay.selectedAgent
-    val showAgentPicker get() = chatDisplay.showAgentPicker
+    val selection get() = chatDisplay.selection
+    val availableAgents get() = selection.availableAgents
+    val availableModels get() = selection.availableModels
+    val selectedAgent get() = selection.committed.agent
+    val selectedModel get() = selection.committed.model
+    val selectedVariant get() = selection.committed.variant
+    val draftSelection get() = selection.draft
+    val showSelectionDialog get() = selection.isDialogOpen
+    val showContextDialog get() = chatDisplay.showContextDialog
+    val isContextUsageLoading get() = chatDisplay.isContextUsageLoading
+    val isCompactingContext get() = chatDisplay.isCompactingContext
+    val contextUsageError get() = chatDisplay.contextUsageError
+    val contextUsageMessage get() = chatDisplay.contextUsageMessage
+    val contextUsageDetail get() = chatDisplay.contextUsageDetail
 }
+
+private data class ResolvedContextUsage(
+    val summary: ContextUsageState,
+    val detail: ContextUsageDetailState,
+)
 
 @HiltViewModel
 class ChatViewModel @Inject constructor(
     private val repository: OConnectorRepository,
+    private val prefs: ConnectionPreferences,
     private val sseEventBus: SseEventBus,
 ) : ViewModel() {
 
@@ -108,6 +162,30 @@ class ChatViewModel @Inject constructor(
         private const val MAX_STREAMING_TEXT = 10_000
     }
 
+    private inline fun updateSelection(transform: (ChatSelectionUiState) -> ChatSelectionUiState) {
+        _uiState.update { current ->
+            current.copy(chatDisplay = current.chatDisplay.copy(selection = transform(current.chatDisplay.selection)))
+        }
+    }
+
+    private fun resetForFullReinitialize(sessionId: String, directory: String?) {
+        sseJob?.cancel()
+        sseJob = null
+        repository.clearStreaming()
+        completedMessageIds.clear()
+        deltaLogCounter = 0
+
+        _uiState.value = ChatUiState(
+            sessionMeta = SessionMetaState(
+                sessionId = sessionId,
+                sessionDirectory = directory,
+            ),
+            chatDisplay = ChatDisplayState(
+                isLoading = true,
+            ),
+        )
+    }
+
     /**
      * Initialize (or re-initialize) the chat session.
      *
@@ -120,12 +198,106 @@ class ChatViewModel @Inject constructor(
      * This ordering ensures the UI never flashes between empty/streaming/idle states.
      */
     fun initialize(sessionId: String, directory: String? = null) {
-        _uiState.update { it.copy(sessionMeta = it.sessionMeta.copy(sessionId = sessionId, sessionDirectory = directory)) }
+        val previousSessionId = _uiState.value.sessionId
+        _uiState.update {
+            it.copy(
+                sessionMeta = it.sessionMeta.copy(sessionId = sessionId, sessionDirectory = directory),
+                chatDisplay = it.chatDisplay.copy(
+                    selection = if (previousSessionId == sessionId) {
+                        it.chatDisplay.selection.copy(
+                            isDialogOpen = false,
+                            draft = it.chatDisplay.selection.committed,
+                        )
+                    } else {
+                        it.chatDisplay.selection.copy(
+                            isDialogOpen = false,
+                            committed = ChatSelectionConfig(),
+                            draft = ChatSelectionConfig(),
+                        )
+                    },
+                ),
+            )
+        }
+
+        viewModelScope.launch {
+            val savedAgent = prefs.getSelectedAgent(sessionId)
+            if (!savedAgent.isNullOrBlank()) {
+                _uiState.update { current ->
+                    if (current.sessionId == sessionId && current.selection.committed.agent.isNullOrBlank()) {
+                        current.copy(
+                            chatDisplay = current.chatDisplay.copy(
+                                selection = current.selection.copy(
+                                    committed = current.selection.committed.copy(agent = savedAgent),
+                                    draft = current.selection.draft.copy(agent = savedAgent),
+                                ),
+                            ),
+                        )
+                    } else {
+                        current
+                    }
+                }
+            }
+        }
+
+        viewModelScope.launch {
+            val savedModel = prefs.getSelectedModel(sessionId)
+            if (savedModel != null) {
+                val modelRef = ModelSelectionRef(savedModel.providerId, savedModel.modelId)
+                _uiState.update { current ->
+                    if (current.sessionId == sessionId && current.selection.committed.model == null) {
+                        current.copy(
+                            chatDisplay = current.chatDisplay.copy(
+                                selection = current.selection.copy(
+                                    committed = current.selection.committed.copy(model = modelRef),
+                                    draft = current.selection.draft.copy(model = modelRef),
+                                ),
+                            ),
+                        )
+                    } else {
+                        current
+                    }
+                }
+            }
+        }
+
+        viewModelScope.launch {
+            val savedVariant = prefs.getSelectedVariant(sessionId)
+            if (!savedVariant.isNullOrBlank()) {
+                _uiState.update { current ->
+                    if (current.sessionId == sessionId && current.selection.committed.variant.isNullOrBlank()) {
+                        current.copy(
+                            chatDisplay = current.chatDisplay.copy(
+                                selection = current.selection.copy(
+                                    committed = current.selection.committed.copy(variant = savedVariant),
+                                    draft = current.selection.draft.copy(variant = savedVariant),
+                                ),
+                            ),
+                        )
+                    } else {
+                        current
+                    }
+                }
+            }
+        }
+
+        viewModelScope.launch {
+            val draft = prefs.getSessionDraft(sessionId)
+            if (!draft.isNullOrBlank()) {
+                _uiState.update { current ->
+                    if (current.sessionId == sessionId && current.chatDisplay.inputText.isBlank()) {
+                        current.copy(chatDisplay = current.chatDisplay.copy(inputText = draft))
+                    } else {
+                        current
+                    }
+                }
+            }
+        }
 
         // These can run in parallel — they don't affect streaming state
         loadSessionInfo()
         loadTodoList()
-        loadAgents()
+        loadAgents(directory)
+        loadProviders()
 
         // Core init: load messages → check state → subscribe to SSE (sequential)
         viewModelScope.launch {
@@ -195,13 +367,22 @@ class ChatViewModel @Inject constructor(
                     Log.d(TAG, "Turn completed while away, clearing streaming state")
                     repository.clearStreaming()
                     _uiState.update { it.copy(chatDisplay = it.chatDisplay.copy(messages = messages, isLoading = false)) }
+                    syncSelectionFromMessages(messages)
+                    refreshContextUsage(messages)
                 } else {
                     // Turn still in progress (or AI hasn't started responding yet)
                     // Restore full streaming state so the UI shows segments + stop button
                     Log.d(TAG, "Restoring streaming state: segs=${segments.size} pending=${pendingMsgId?.take(8)}")
                     _uiState.update {
                         it.copy(
-                            chatDisplay = it.chatDisplay.copy(messages = messages, isLoading = false),
+                            chatDisplay = it.chatDisplay.copy(
+                                messages = messages,
+                                isLoading = false,
+                                selection = it.selection.copy(
+                                    committed = it.selection.committed.copy(agent = agent ?: it.selection.committed.agent),
+                                    draft = it.selection.draft.copy(agent = agent ?: it.selection.draft.agent),
+                                ),
+                            ),
                             streaming = it.streaming.copy(
                                 isSending = true,
                                 isStreaming = segments.isNotEmpty(),
@@ -211,10 +392,13 @@ class ChatViewModel @Inject constructor(
                             ),
                         )
                     }
+                    persistSelection(_uiState.value.selection.committed)
                 }
             } else {
                 // No streaming state for this session — normal load
                 _uiState.update { it.copy(chatDisplay = it.chatDisplay.copy(messages = messages, isLoading = false)) }
+                syncSelectionFromMessages(messages)
+                refreshContextUsage(messages)
             }
 
             // ── Step 4: Subscribe to SSE AFTER state is fully restored ──
@@ -222,6 +406,11 @@ class ChatViewModel @Inject constructor(
             // before streaming state is set, causing premature clearing.
             subscribeToEvents()
         }
+    }
+
+    fun refreshSession(sessionId: String, directory: String? = null) {
+        resetForFullReinitialize(sessionId, directory)
+        initialize(sessionId, directory)
     }
 
     private fun loadSessionInfo() {
@@ -240,6 +429,9 @@ class ChatViewModel @Inject constructor(
                         ),
                     )
                 }
+                if (!dir.isNullOrBlank()) {
+                    loadAgents(dir)
+                }
             } catch (e: Exception) { Log.w(TAG, "Failed to load session info", e) }
         }
     }
@@ -253,12 +445,29 @@ class ChatViewModel @Inject constructor(
         }
     }
 
-    private fun loadAgents() {
+    private fun loadAgents(directory: String? = _uiState.value.sessionDirectory) {
+        viewModelScope.launch {
+            val cachedAgents = repository.getCachedAgents()
+            if (directory.isNullOrBlank() && cachedAgents.isNotEmpty()) {
+                updateSelection { selection -> selection.copy(availableAgents = cachedAgents) }
+            }
+            try {
+                val agents = repository.listAgents(directory?.takeIf { it.isNotBlank() })
+                updateSelection { selection -> selection.copy(availableAgents = agents) }
+            } catch (e: Exception) { Log.w(TAG, "Failed to load agents", e) }
+        }
+    }
+
+    private fun loadProviders() {
         viewModelScope.launch {
             try {
-                val agents = repository.listAgents()
-                _uiState.update { it.copy(chatDisplay = it.chatDisplay.copy(availableAgents = agents)) }
-            } catch (e: Exception) { Log.w(TAG, "Failed to load agents", e) }
+                val providers = repository.listProviders()
+                val modelOptions = buildModelOptions(providers, repository.getCachedConnectedProviderIds())
+                updateSelection { selection -> normalizeSelectionState(selection.copy(availableModels = modelOptions)) }
+                refreshContextUsage(_uiState.value.messages)
+            } catch (e: Exception) {
+                Log.w(TAG, "Failed to load providers", e)
+            }
         }
     }
 
@@ -308,7 +517,7 @@ class ChatViewModel @Inject constructor(
             }
 
             // ── Part state update (full text so far) ──
-            "message.part.updated" -> {
+            "message.part.updated", "message.part.update" -> {
                 val part = props.part ?: return
                 val partMessageId = part.messageID ?: return
                 val pendingId = _uiState.value.pendingAssistantMessageId ?: return
@@ -357,6 +566,10 @@ class ChatViewModel @Inject constructor(
                     }
                     Log.d(TAG, "New assistant msg: ${info.id?.take(8)} agent=${info.agent} segs=${_uiState.value.streamingSegments.size}")
                     val agentName = info.agent ?: info.mode ?: _uiState.value.streamingAgent
+                    val selectionFromMessage = selectionFromMessageInfo(info, fallbackAgent = agentName)
+                    if (selectionFromMessage != null) {
+                        applyCommittedSelection(selectionFromMessage)
+                    }
                     repository.setStreamingPendingMsgId(info.id)
                     _uiState.update {
                         it.copy(
@@ -407,6 +620,7 @@ class ChatViewModel @Inject constructor(
                         try {
                             val messages = repository.getMessages(_uiState.value.sessionId, _uiState.value.sessionDirectory)
                             _uiState.update { it.copy(chatDisplay = it.chatDisplay.copy(messages = messages)) }
+                            refreshContextUsage(messages)
                         } catch (e: Exception) {
                             Log.e(TAG, "Failed to reload messages after session.idle", e)
                         }
@@ -423,7 +637,14 @@ class ChatViewModel @Inject constructor(
 
             // ── Todo events ──
             "todo.updated" -> {
-                loadTodoList()
+                val todosFromEvent = props.todos
+                if (todosFromEvent != null) {
+                    _uiState.update {
+                        it.copy(chatDisplay = it.chatDisplay.copy(todoItems = todosFromEvent))
+                    }
+                } else {
+                    loadTodoList()
+                }
             }
 
             // ── Internal sync (ignore) ──
@@ -477,6 +698,7 @@ class ChatViewModel @Inject constructor(
 
     fun onInputChange(text: String) {
         _uiState.update { it.copy(chatDisplay = it.chatDisplay.copy(inputText = text)) }
+        persistSessionDraft(text)
     }
 
     fun sendMessage() {
@@ -487,7 +709,12 @@ class ChatViewModel @Inject constructor(
         // use its configured default (from opencode.json). DO NOT try to guess via
         // mode=="primary" — all visible agents are mode=subagent, and hidden ones
         // like "build"/"compaction" are mode=primary but are utility agents.
-        val agentName = _uiState.value.selectedAgent
+        val selection = _uiState.value.selection.committed
+        val agentName = selection.agent
+        val selectedModel = selection.model?.let {
+            SendMessageModelRef(providerID = it.providerId, modelID = it.modelId)
+        }
+        val selectedVariant = selection.variant
 
         // Clear completed IDs from previous turn — new conversation turn starting
         completedMessageIds.clear()
@@ -517,23 +744,36 @@ class ChatViewModel @Inject constructor(
                 ),
             )
         }
+        persistSessionDraft("")
 
         // 2. Fire-and-forget: send async, don't block UI
         viewModelScope.launch {
             try {
                 repository.beginStreaming(_uiState.value.sessionId, agentName)
-                repository.sendMessage(_uiState.value.sessionId, text, _uiState.value.selectedAgent, _uiState.value.sessionDirectory)
-                // prompt_async returns 204 immediately — SSE events drive the rest
+                repository.sendMessage(
+                    sessionId = _uiState.value.sessionId,
+                    message = text,
+                    agent = agentName,
+                    model = selectedModel,
+                    variant = selectedVariant,
+                    directory = _uiState.value.sessionDirectory,
+                )
+                // REST send just kicks off the turn — SSE events still drive streaming UI
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to send message", e)
                 repository.clearStreaming()
+                persistSessionDraft(text)
                 val s = com.opencode.remote.ui.strings.AppLocale.strings
                 _uiState.update {
                     it.copy(
                         streaming = it.streaming.copy(isSending = false, isStreaming = false),
-                        chatDisplay = it.chatDisplay.copy(error = s.errSendFailed.replace("%s", e.localizedMessage ?: e.javaClass.simpleName)),
+                        chatDisplay = it.chatDisplay.copy(
+                            inputText = text,
+                            error = s.errSendFailed.replace("%s", e.localizedMessage ?: e.javaClass.simpleName),
+                        ),
                     )
                 }
+                persistSessionDraft(text)
             }
         }
     }
@@ -558,16 +798,486 @@ class ChatViewModel @Inject constructor(
         _uiState.update { it.copy(chatDisplay = it.chatDisplay.copy(showTodoPanel = !it.chatDisplay.showTodoPanel)) }
     }
 
-    fun toggleAgentPicker() {
-        _uiState.update { it.copy(chatDisplay = it.chatDisplay.copy(showAgentPicker = !it.chatDisplay.showAgentPicker)) }
+    fun openSelectionDialog() {
+        updateSelection { selection ->
+            normalizeSelectionState(
+                selection.copy(
+                    isDialogOpen = true,
+                    draft = selection.committed,
+                ),
+            )
+        }
     }
 
-    fun selectAgent(agentName: String?) {
-        _uiState.update { it.copy(chatDisplay = it.chatDisplay.copy(selectedAgent = agentName, showAgentPicker = false)) }
+    fun dismissSelectionDialog() {
+        updateSelection { selection ->
+            selection.copy(
+                isDialogOpen = false,
+                draft = selection.committed,
+            )
+        }
+    }
+
+    fun updateDraftAgent(agentName: String?) {
+        updateSelection { selection ->
+            selection.copy(draft = selection.draft.copy(agent = agentName))
+        }
+    }
+
+    fun updateDraftModel(model: ModelSelectionRef?) {
+        updateSelection { selection ->
+            val next = selection.copy(draft = selection.draft.copy(model = model))
+            normalizeSelectionState(next)
+        }
+    }
+
+    fun updateDraftVariant(variant: String?) {
+        updateSelection { selection ->
+            val normalizedVariant = variant?.takeIf { it in selection.draftVariants }
+            selection.copy(draft = selection.draft.copy(variant = normalizedVariant))
+        }
+    }
+
+    fun confirmSelectionDialog() {
+        val committed = normalizeSelectionConfig(
+            config = _uiState.value.selection.draft,
+            options = _uiState.value.selection,
+        )
+        updateSelection { selection ->
+            selection.copy(
+                isDialogOpen = false,
+                committed = committed,
+                draft = committed,
+            )
+        }
+        persistSelection(committed)
+    }
+
+    fun renameCurrentSession(title: String, onSuccess: (() -> Unit)? = null) {
+        viewModelScope.launch {
+            val trimmed = title.trim()
+            if (trimmed.isEmpty()) return@launch
+            try {
+                val updated = repository.updateSessionTitle(_uiState.value.sessionId, trimmed, _uiState.value.sessionDirectory)
+                _uiState.update {
+                    it.copy(
+                        sessionMeta = it.sessionMeta.copy(
+                            sessionTitle = updated.title ?: updated.slug ?: it.sessionTitle,
+                        ),
+                    )
+                }
+                onSuccess?.invoke()
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to rename current session", e)
+                val s = com.opencode.remote.ui.strings.AppLocale.strings
+                _uiState.update { it.copy(chatDisplay = it.chatDisplay.copy(error = s.errRenameSession.replace("%s", e.localizedMessage ?: e.javaClass.simpleName))) }
+            }
+        }
     }
 
     fun clearError() {
         _uiState.update { it.copy(chatDisplay = it.chatDisplay.copy(error = null)) }
+    }
+
+    fun openContextUsageDialog() {
+        _uiState.update {
+            it.copy(
+                chatDisplay = it.chatDisplay.copy(
+                    showContextDialog = true,
+                    isContextUsageLoading = true,
+                    isCompactingContext = false,
+                    contextUsageError = null,
+                    contextUsageMessage = null,
+                ),
+            )
+        }
+
+        viewModelScope.launch {
+            try {
+                val providers = repository.listProviders()
+                val messages = repository.getMessages(_uiState.value.sessionId, _uiState.value.sessionDirectory)
+                val resolved = resolveContextUsage(messages, providers)
+                _uiState.update {
+                    it.copy(
+                        sessionMeta = it.sessionMeta.copy(contextUsage = resolved?.summary),
+                        chatDisplay = it.chatDisplay.copy(
+                            isContextUsageLoading = false,
+                            isCompactingContext = false,
+                            contextUsageError = null,
+                            contextUsageMessage = null,
+                            contextUsageDetail = resolved?.detail,
+                        ),
+                    )
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to refresh context usage details", e)
+                val s = com.opencode.remote.ui.strings.AppLocale.strings
+                _uiState.update {
+                    it.copy(
+                        chatDisplay = it.chatDisplay.copy(
+                            isContextUsageLoading = false,
+                            isCompactingContext = false,
+                            contextUsageError = s.errLoadMessages.replace("%s", e.localizedMessage ?: e.javaClass.simpleName),
+                            contextUsageMessage = null,
+                        ),
+                    )
+                }
+            }
+        }
+    }
+
+    fun compactCurrentSession() {
+        val s = com.opencode.remote.ui.strings.AppLocale.strings
+        val state = _uiState.value
+
+        if (state.isSending || state.isStreaming) {
+            _uiState.update {
+                it.copy(chatDisplay = it.chatDisplay.copy(contextUsageError = s.contextCompactWhileStreaming, contextUsageMessage = null))
+            }
+            return
+        }
+
+        viewModelScope.launch {
+            try {
+                val providers = repository.listProviders()
+                val target = resolveCompactionTarget(
+                    messages = state.messages,
+                    providers = providers,
+                    defaults = repository.getCachedProviderDefaults(),
+                    connectedProviderIds = repository.getCachedConnectedProviderIds(),
+                )
+                if (target == null) {
+                    _uiState.update {
+                        it.copy(chatDisplay = it.chatDisplay.copy(contextUsageError = s.contextCompactUnavailable, contextUsageMessage = null))
+                    }
+                    return@launch
+                }
+
+                _uiState.update {
+                    it.copy(
+                        chatDisplay = it.chatDisplay.copy(
+                            isCompactingContext = true,
+                            contextUsageError = null,
+                            contextUsageMessage = null,
+                        ),
+                    )
+                }
+
+                repository.summarizeSession(
+                    sessionId = state.sessionId,
+                    providerID = target.providerId,
+                    modelID = target.modelId,
+                    directory = state.sessionDirectory,
+                )
+
+                loadSessionInfo()
+                val messages = repository.getMessages(state.sessionId, state.sessionDirectory)
+                val resolved = resolveContextUsage(messages, providers)
+
+                _uiState.update {
+                    it.copy(
+                        sessionMeta = it.sessionMeta.copy(contextUsage = resolved?.summary),
+                        chatDisplay = it.chatDisplay.copy(
+                            messages = messages,
+                            isCompactingContext = false,
+                            contextUsageError = null,
+                            contextUsageMessage = s.contextCompacted,
+                            contextUsageDetail = resolved?.detail,
+                        ),
+                    )
+                }
+                loadTodoList()
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to compact session context", e)
+                _uiState.update {
+                    it.copy(
+                        chatDisplay = it.chatDisplay.copy(
+                            isCompactingContext = false,
+                            contextUsageError = e.localizedMessage ?: s.contextRefreshFailed,
+                            contextUsageMessage = null,
+                        ),
+                    )
+                }
+            }
+        }
+    }
+
+    fun closeContextUsageDialog() {
+        _uiState.update {
+            it.copy(
+                chatDisplay = it.chatDisplay.copy(
+                    showContextDialog = false,
+                    isContextUsageLoading = false,
+                    isCompactingContext = false,
+                    contextUsageError = null,
+                    contextUsageMessage = null,
+                ),
+            )
+        }
+    }
+
+    private data class CompactionTarget(
+        val providerId: String,
+        val modelId: String,
+    )
+
+    private fun resolveCompactionTarget(
+        messages: List<MessageInfo>,
+        providers: List<ProviderInfo>,
+        defaults: Map<String, String>,
+        connectedProviderIds: List<String>,
+    ): CompactionTarget? {
+        val recentProviderId = messages.asReversed()
+            .firstNotNullOfOrNull { message ->
+                if (message.role != "assistant") return@firstNotNullOfOrNull null
+                message.info.resolvedProviderID
+            }
+        val recentModelId = messages.asReversed()
+            .firstNotNullOfOrNull { message ->
+                if (message.role != "assistant") return@firstNotNullOfOrNull null
+                message.info.resolvedModelID
+            }
+
+        val provider = providers.firstOrNull { it.id == recentProviderId }
+            ?: connectedProviderIds.firstNotNullOfOrNull { connectedId ->
+                providers.firstOrNull { it.id == connectedId }
+            }
+            ?: providers.firstOrNull()
+            ?: return null
+
+        val modelId = when {
+            recentProviderId == provider.id && !recentModelId.isNullOrBlank() && provider.models.containsKey(recentModelId) -> recentModelId
+            defaults[provider.id]?.let(provider.models::containsKey) == true -> defaults[provider.id]
+            provider.models.isNotEmpty() -> provider.models.keys.first()
+            else -> null
+        } ?: return null
+
+        return CompactionTarget(provider.id, modelId)
+    }
+
+    private fun refreshContextUsage(messages: List<MessageInfo>) {
+        val resolved = resolveContextUsage(messages, repository.getCachedProviders())
+        _uiState.update {
+            it.copy(
+                sessionMeta = it.sessionMeta.copy(contextUsage = resolved?.summary),
+                chatDisplay = it.chatDisplay.copy(
+                    contextUsageDetail = resolved?.detail ?: it.chatDisplay.contextUsageDetail,
+                ),
+            )
+        }
+    }
+
+    private fun resolveContextUsage(messages: List<MessageInfo>, providers: List<ProviderInfo>): ResolvedContextUsage? {
+        val latestAssistantWithTokens = messages.asReversed().firstOrNull { message ->
+            message.role == "assistant" && message.tokenTotal() > 0
+        } ?: return null
+
+        val providerId = latestAssistantWithTokens.info.resolvedProviderID ?: messages.asReversed()
+            .firstNotNullOfOrNull { message ->
+                if (message.role != "assistant") return@firstNotNullOfOrNull null
+                message.info.resolvedProviderID
+            }
+        val modelId = latestAssistantWithTokens.info.resolvedModelID ?: messages.asReversed()
+            .firstNotNullOfOrNull { message ->
+                if (message.role != "assistant") return@firstNotNullOfOrNull null
+                message.info.resolvedModelID
+            }
+        val contextLimit = findContextLimit(providers = providers, providerId = providerId, modelId = modelId)
+        val totalTokens = latestAssistantWithTokens.tokenTotal()
+        val totalCost = messages.asSequence()
+            .filter { it.role == "assistant" }
+            .sumOf { it.info.cost ?: 0.0 }
+        val usagePercent = if (contextLimit != null && contextLimit > 0) {
+            ((totalTokens.toDouble() / contextLimit.toDouble()) * 100).roundToInt().coerceIn(0, 999)
+        } else {
+            null
+        }
+        val breakdown = latestAssistantWithTokens.tokenBreakdown()
+
+        return ResolvedContextUsage(
+            summary = ContextUsageState(
+                usagePercent = usagePercent,
+                totalTokens = totalTokens,
+                totalCost = totalCost,
+                modelLimit = contextLimit,
+            ),
+            detail = ContextUsageDetailState(
+                usagePercent = usagePercent,
+                totalTokens = totalTokens,
+                totalCost = totalCost,
+                latestMessageCost = latestAssistantWithTokens.info.cost ?: 0.0,
+                modelLimit = contextLimit,
+                providerId = providerId,
+                modelId = modelId,
+                latestMessageId = latestAssistantWithTokens.id,
+                latestCompletedAt = latestAssistantWithTokens.info.time?.completed,
+                breakdown = breakdown,
+            ),
+        )
+    }
+
+    private fun MessageTokens?.tokenTotal(): Int {
+        if (this == null) return 0
+        return total ?: (
+            (input ?: 0) +
+                (output ?: 0) +
+                (reasoning ?: 0) +
+                (cacheRead ?: cache?.read ?: 0) +
+                (cacheWrite ?: cache?.write ?: 0)
+            )
+    }
+
+    private fun MessageInfo.tokenTotal(): Int {
+        val infoTotal = info.tokens.tokenTotal()
+        if (infoTotal > 0) return infoTotal
+        return parts.sumOf { it.tokens.tokenTotal() }
+    }
+
+    private fun MessageTokens?.toBreakdown(): ContextTokenBreakdown {
+        if (this == null) {
+            return ContextTokenBreakdown(0, 0, 0, 0, 0)
+        }
+        return ContextTokenBreakdown(
+            inputTokens = input ?: 0,
+            outputTokens = output ?: 0,
+            reasoningTokens = reasoning ?: 0,
+            cacheReadTokens = cacheRead ?: cache?.read ?: 0,
+            cacheWriteTokens = cacheWrite ?: cache?.write ?: 0,
+        )
+    }
+
+    private fun MessageInfo.tokenBreakdown(): ContextTokenBreakdown {
+        val infoTotal = info.tokens.tokenTotal()
+        if (infoTotal > 0) return info.tokens.toBreakdown()
+        return parts.fold(ContextTokenBreakdown(0, 0, 0, 0, 0)) { acc, part ->
+            val next = part.tokens.toBreakdown()
+            ContextTokenBreakdown(
+                inputTokens = acc.inputTokens + next.inputTokens,
+                outputTokens = acc.outputTokens + next.outputTokens,
+                reasoningTokens = acc.reasoningTokens + next.reasoningTokens,
+                cacheReadTokens = acc.cacheReadTokens + next.cacheReadTokens,
+                cacheWriteTokens = acc.cacheWriteTokens + next.cacheWriteTokens,
+            )
+        }
+    }
+
+    private fun findContextLimit(providers: List<ProviderInfo>, providerId: String?, modelId: String?): Int? {
+        if (providerId.isNullOrBlank() || modelId.isNullOrBlank()) return null
+
+        val provider = providers.firstOrNull { it.id == providerId } ?: return null
+        return provider.models[modelId]?.limit?.context
+            ?: provider.models.values.firstOrNull { model ->
+                model.id == modelId || model.name == modelId
+            }?.limit?.context
+    }
+
+    private fun buildModelOptions(
+        providers: List<ProviderInfo>,
+        connectedProviderIds: List<String>,
+    ): List<ModelSelectionOption> {
+        val connected = connectedProviderIds.toSet()
+        val visibleProviders = providers.filter { connected.isEmpty() || it.id in connected }
+        return visibleProviders
+            .sortedBy { it.name ?: it.id }
+            .flatMap { provider ->
+                provider.models.map { (modelKey, model) ->
+                    ModelSelectionOption(
+                        ref = ModelSelectionRef(provider.id, model.id ?: modelKey),
+                        providerName = provider.name ?: provider.id,
+                        modelName = model.name ?: model.id ?: modelKey,
+                        variants = model.variants.keys.sorted(),
+                    )
+                }
+            }
+            .sortedWith(compareBy<ModelSelectionOption> { it.providerName.lowercase() }.thenBy { it.modelName.lowercase() })
+    }
+
+    private fun normalizeSelectionState(selection: ChatSelectionUiState): ChatSelectionUiState {
+        val committed = normalizeSelectionConfig(selection.committed, selection)
+        val draftBase = selection.copy(committed = committed)
+        val draft = normalizeSelectionConfig(selection.draft, draftBase)
+        return selection.copy(committed = committed, draft = draft)
+    }
+
+    private fun normalizeSelectionConfig(
+        config: ChatSelectionConfig,
+        options: ChatSelectionUiState,
+    ): ChatSelectionConfig {
+        val model = config.model?.takeIf { options.resolveModel(it) != null }
+        val availableVariants = options.resolveModel(model)?.variants.orEmpty()
+        val variant = config.variant?.takeIf { it in availableVariants }
+        return config.copy(model = model, variant = variant)
+    }
+
+    private fun selectionFromMessageInfo(
+        info: MessageInfoData,
+        fallbackAgent: String? = null,
+    ): ChatSelectionConfig? {
+        val agent = info.agent?.takeIf { it.isNotBlank() }
+            ?: fallbackAgent?.takeIf { it.isNotBlank() }
+            ?: info.mode?.takeIf { it.isNotBlank() }
+        val providerId = info.resolvedProviderID?.takeIf { it.isNotBlank() }
+        val modelId = info.resolvedModelID?.takeIf { it.isNotBlank() }
+        val model = if (providerId != null && modelId != null) {
+            ModelSelectionRef(providerId, modelId)
+        } else {
+            null
+        }
+        val variant = info.resolvedVariant?.takeIf { it.isNotBlank() }
+        if (agent == null && model == null && variant == null) return null
+        return ChatSelectionConfig(agent = agent, model = model, variant = variant)
+    }
+
+    private fun syncSelectionFromMessages(messages: List<MessageInfo>) {
+        val resolved = messages.asReversed()
+            .firstNotNullOfOrNull { message ->
+                if (message.role != "assistant") return@firstNotNullOfOrNull null
+                selectionFromMessageInfo(message.info)
+            }
+        if (resolved != null) {
+            applyCommittedSelection(resolved)
+        }
+    }
+
+    private fun applyCommittedSelection(update: ChatSelectionConfig) {
+        updateSelection { selection ->
+            normalizeSelectionState(
+                selection.copy(
+                    committed = selection.committed.copy(
+                        agent = update.agent ?: selection.committed.agent,
+                        model = update.model ?: selection.committed.model,
+                        variant = update.variant ?: selection.committed.variant,
+                    ),
+                    draft = selection.draft.copy(
+                        agent = update.agent ?: selection.draft.agent,
+                        model = update.model ?: selection.draft.model,
+                        variant = update.variant ?: selection.draft.variant,
+                    ),
+                ),
+            )
+        }
+        persistSelection(_uiState.value.selection.committed)
+    }
+
+    private fun persistSelection(selection: ChatSelectionConfig) {
+        val sessionId = _uiState.value.sessionId
+        if (sessionId.isBlank()) return
+        viewModelScope.launch {
+            prefs.saveSelectedAgent(sessionId, selection.agent)
+            prefs.saveSelectedModel(
+                sessionId,
+                selection.model?.let { StoredModelSelection(providerId = it.providerId, modelId = it.modelId) },
+            )
+            prefs.saveSelectedVariant(sessionId, selection.variant)
+        }
+    }
+
+    private fun persistSessionDraft(draft: String?) {
+        val sessionId = _uiState.value.sessionId
+        if (sessionId.isBlank()) return
+        viewModelScope.launch {
+            prefs.saveSessionDraft(sessionId, draft)
+        }
     }
 
     override fun onCleared() {

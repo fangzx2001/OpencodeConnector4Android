@@ -15,13 +15,21 @@ import io.ktor.client.plugins.contentnegotiation.*
 import io.ktor.client.request.*
 import io.ktor.http.*
 import io.ktor.serialization.kotlinx.json.*
+import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.decodeFromJsonElement
+import kotlinx.serialization.json.jsonPrimitive
 import javax.inject.Inject
 import java.net.URLEncoder
 import javax.net.ssl.SSLContext
 import javax.net.ssl.X509TrustManager
 import java.security.cert.X509Certificate
 import javax.net.ssl.TrustManager
+import kotlin.time.Duration.Companion.minutes
 
 /**
  * REST API client for OpenCode server v1.14.x
@@ -31,11 +39,16 @@ import javax.net.ssl.TrustManager
  *   POST /session                   → CreateSessionResponse
  *   GET  /session/{id}              → SessionInfo
  *   DELETE /session/{id}            → 200 OK
+ *   PATCH /session/{id}             → SessionInfo
  *   POST /session/{id}/fork         → CreateSessionResponse
  *   POST /session/{id}/abort        → 200 OK
+ *   POST /session/{id}/share        → SessionInfo
+ *   DELETE /session/{id}/share      → SessionInfo
  *   GET  /session/{id}/message      → List<MessageInfo>
- *   POST /session/{id}/prompt_async → 204 No Content (async, AI output via SSE)
+ *   POST /session/{id}/message      → preferred send route on newer OpenCode builds
+ *   POST /session/{id}/prompt_async → legacy async send route kept for compatibility
  *   GET  /session/{id}/todo         → List<TodoItem>
+ *   GET  /provider                  → ProvidersResponseDto
  *   GET  /project/current           → ProjectInfo
  */
 class OConnectorApiClient @Inject constructor(
@@ -80,6 +93,8 @@ class OConnectorApiClient @Inject constructor(
         private const val TAG = "OConnectorApiClient"
         /** Maximum number of messages to load from server. Prevents OOM on long sessions. */
         private const val MAX_MESSAGES = 50
+        /** Message send may legitimately stay open while the server starts processing. */
+        private val SEND_MESSAGE_TIMEOUT_MS = 3.minutes.inWholeMilliseconds
     }
 
     /**
@@ -174,6 +189,16 @@ class OConnectorApiClient @Inject constructor(
         }
     }
 
+    /** PATCH /session/{id} */
+    suspend fun updateSession(id: String, title: String, directory: String? = null): SessionInfo =
+        client.patch("/session/$id") {
+            setBody(UpdateSessionRequest(title = title))
+            directory?.let {
+                parameter("directory", it)
+                header("x-opencode-directory", encDir(it))
+            }
+        }.body<SessionInfo>()
+
     /** POST /session/{id}/fork with empty body */
     suspend fun forkSession(id: String, directory: String? = null): CreateSessionResponse =
         client.post("/session/$id/fork") {
@@ -193,6 +218,40 @@ class OConnectorApiClient @Inject constructor(
             }
         }
     }
+
+    /** POST /session/{id}/summarize */
+    suspend fun summarizeSession(
+        id: String,
+        providerID: String,
+        modelID: String,
+        directory: String? = null,
+    ) {
+        client.post("/session/$id/summarize") {
+            setBody(SummarizeSessionRequest(providerID = providerID, modelID = modelID))
+            directory?.let {
+                parameter("directory", it)
+                header("x-opencode-directory", encDir(it))
+            }
+        }
+    }
+
+    /** POST /session/{id}/share */
+    suspend fun shareSession(id: String, directory: String? = null): SessionInfo =
+        client.post("/session/$id/share") {
+            directory?.let {
+                parameter("directory", it)
+                header("x-opencode-directory", encDir(it))
+            }
+        }.body<SessionInfo>()
+
+    /** DELETE /session/{id}/share */
+    suspend fun unshareSession(id: String, directory: String? = null): SessionInfo =
+        client.delete("/session/$id/share") {
+            directory?.let {
+                parameter("directory", it)
+                header("x-opencode-directory", encDir(it))
+            }
+        }.body<SessionInfo>()
 
     // ─── Messages ──────────────────────────────────────────────────────
 
@@ -225,19 +284,67 @@ class OConnectorApiClient @Inject constructor(
     }
 
     /**
-     * POST /session/{id}/prompt_async — 异步发送（HTTP 204, 立即返回）
-     * Body: {"parts":[{"type":"text","text":"user message"}],"agent":"optional"}
-     * AI 生成通过 SSE 事件流实时推送（message.part.delta, message.completed)
+     * Send a user message using the newest known route first, then fall back
+     * to the legacy async endpoint when talking to older servers.
+     *
+     * Newer OpenCode builds prefer POST /session/{id}/message with a parts[] body.
+     * Older builds may still only support POST /session/{id}/prompt_async.
+     *
+     * In both cases the Android client still treats SSE as the source of truth
+     * for streaming assistant output and turn completion.
      */
-    suspend fun sendMessage(sessionId: String, text: String, agent: String? = null, directory: String? = null) {
-        client.post("/session/$sessionId/prompt_async") {
-            setBody(SendMessageRequest(parts = listOf(SendMessagePart(text = text)), agent = agent))
-            directory?.let {
-                parameter("directory", it)
-                header("x-opencode-directory", encDir(it))
+    suspend fun sendMessage(
+        sessionId: String,
+        text: String,
+        agent: String? = null,
+        model: SendMessageModelRef? = null,
+        variant: String? = null,
+        directory: String? = null,
+    ) {
+        val request = SendMessageRequest(
+            parts = listOf(SendMessagePart(text = text)),
+            agent = agent,
+            model = model,
+            variant = variant,
+        )
+
+        try {
+            client.post("/session/$sessionId/message") {
+                applyMessageSendRequestOptions(directory)
+                setBody(request)
             }
+            Log.d(TAG, "Sent message via /session/$sessionId/message")
+            return
+        } catch (e: ResponseException) {
+            if (!shouldFallbackToLegacyPromptAsync(e.response.status)) throw e
+            Log.w(
+                TAG,
+                "Send via /session/$sessionId/message not supported (${e.response.status}), falling back to /prompt_async",
+            )
+        }
+
+        client.post("/session/$sessionId/prompt_async") {
+            applyMessageSendRequestOptions(directory)
+            setBody(request)
+        }
+        Log.d(TAG, "Sent message via legacy /session/$sessionId/prompt_async")
+    }
+
+    private fun HttpRequestBuilder.applyMessageSendRequestOptions(directory: String?) {
+        timeout {
+            requestTimeoutMillis = SEND_MESSAGE_TIMEOUT_MS
+            socketTimeoutMillis = SEND_MESSAGE_TIMEOUT_MS
+        }
+        directory?.let {
+            parameter("directory", it)
+            header("x-opencode-directory", encDir(it))
         }
     }
+
+    private fun shouldFallbackToLegacyPromptAsync(status: HttpStatusCode): Boolean =
+        status == HttpStatusCode.NotFound ||
+            status == HttpStatusCode.MethodNotAllowed ||
+            status == HttpStatusCode.NotImplemented
 
     // ─── Todo ──────────────────────────────────────────────────────────
 
@@ -331,9 +438,99 @@ class OConnectorApiClient @Inject constructor(
 
     // ─── Agents ─────────────────────────────────────────────────────────
 
-    /** GET /agent → returns array of available agents */
-    suspend fun listAgents(): List<AgentInfo> =
-        client.get("/agent").body<List<AgentInfo>>()
+    /** GET /agent → returns available agents; scope by directory when provided */
+    suspend fun listAgents(directory: String? = null): List<AgentInfo> {
+        val raw = client.get("/agent") {
+            directory?.let {
+                parameter("directory", it)
+                header("x-opencode-directory", encDir(it))
+            }
+        }.body<String>()
+        return parseAgentsResponse(raw)
+    }
+
+    private fun parseAgentsResponse(raw: String): List<AgentInfo> {
+        val element = json.decodeFromString<JsonElement>(raw)
+        return when (element) {
+            is JsonArray -> element.mapNotNull(::parseAgentInfo)
+            is JsonObject -> parseAgentList(element["agents"])
+                .ifEmpty { parseAgentList(element["items"]) }
+                .ifEmpty { parseAgentList(element["data"]) }
+            else -> emptyList()
+        }
+    }
+
+    private fun parseAgentList(element: JsonElement?): List<AgentInfo> =
+        (element as? JsonArray)?.mapNotNull(::parseAgentInfo).orEmpty()
+
+    private fun parseAgentInfo(element: JsonElement): AgentInfo? {
+        val obj = element as? JsonObject ?: return null
+        val name = obj["name"]?.jsonPrimitive?.contentOrNull ?: return null
+        return AgentInfo(
+            name = name,
+            mode = obj["mode"]?.jsonPrimitive?.contentOrNull,
+            description = obj["description"]?.jsonPrimitive?.contentOrNull,
+            hidden = obj["hidden"]?.jsonPrimitive?.contentOrNull?.toBooleanStrictOrNull() ?: false,
+        )
+    }
+
+    /** GET /provider → returns providers and model limits */
+    suspend fun listProviders(): ProvidersResponseDto {
+        val raw = client.get("/provider").body<String>()
+        return parseProvidersResponse(raw)
+    }
+
+    private fun parseProvidersResponse(raw: String): ProvidersResponseDto {
+        val element = json.decodeFromString<JsonElement>(raw)
+        return when (element) {
+            is JsonArray -> ProvidersResponseDto(providers = element.mapNotNull(::parseProviderInfo))
+            is JsonObject -> ProvidersResponseDto(
+                all = parseProviderList(element["all"]),
+                providers = parseProviderList(element["providers"]).ifEmpty { parseProviderList(element["items"]) },
+                default = parseStringMap(element["default"]),
+                connected = parseStringList(element["connected"]),
+            )
+            else -> ProvidersResponseDto()
+        }
+    }
+
+    private fun parseProviderList(element: JsonElement?): List<ProviderInfo> =
+        (element as? JsonArray)?.mapNotNull(::parseProviderInfo).orEmpty()
+
+    private fun parseProviderInfo(element: JsonElement): ProviderInfo? {
+        val obj = element as? JsonObject ?: return null
+        val id = obj["id"]?.jsonPrimitive?.contentOrNull ?: return null
+        val name = obj["name"]?.jsonPrimitive?.contentOrNull
+        return ProviderInfo(
+            id = id,
+            name = name,
+            models = parseProviderModels(obj["models"]),
+        )
+    }
+
+    private fun parseProviderModels(element: JsonElement?): Map<String, ProviderModelInfo> = when (element) {
+        is JsonObject -> element.mapNotNull { (key, value) ->
+            runCatching { key to json.decodeFromJsonElement<ProviderModelInfo>(value) }.getOrNull()
+        }.toMap()
+        is JsonArray -> element.mapIndexedNotNull { index, value ->
+            runCatching {
+                val model = json.decodeFromJsonElement<ProviderModelInfo>(value)
+                val key = model.id ?: model.name ?: index.toString()
+                key to model
+            }.getOrNull()
+        }.toMap()
+        else -> emptyMap()
+    }
+
+    private fun parseStringMap(element: JsonElement?): Map<String, String> {
+        val obj = element as? JsonObject ?: return emptyMap()
+        return obj.mapNotNull { (key, value) ->
+            value.jsonPrimitive.contentOrNull?.let { key to it }
+        }.toMap()
+    }
+
+    private fun parseStringList(element: JsonElement?): List<String> =
+        (element as? JsonArray)?.mapNotNull { it.jsonPrimitive.contentOrNull }.orEmpty()
 
     fun close() {
         try { client.close() } catch (_: Exception) {}

@@ -53,6 +53,7 @@ data class EventProperties(
     val delta: String? = null,
     val field: String? = null,
     val error: String? = null,
+    val todos: List<TodoItem>? = null,
     val part: MessagePart? = null,
     val info: MessageInfoData? = null,
 )
