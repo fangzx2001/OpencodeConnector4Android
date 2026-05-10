@@ -158,10 +158,18 @@ Yes. The OpenCode server supports multiple clients.
 - Do not expose port to the public internet
 - Passwords encrypted locally via EncryptedSharedPreferences
 
+## PR Version Convention
+
+- PR (community-contributed) versions are named in the format `v_pr<version>` (e.g. `v_pr2`, `v_pr3`).
+- PR versions are released separately from the main branch releases and contain features that have not yet been merged into `main`.
+- All PRs should be merged into the `pr_version` branch.
+- Contributors are expected to perform final checks and ensure compatibility with the latest `pr_version` branch before submitting.
+- The `pr_test` branch is a backup/testing-only branch and should not be used as the merge target.
+
 ## Contributing
 
 1. Fork → branch → commit → push → PR
-2. Ensure code compiles
+2. Ensure code compiles and is compatible with the latest `pr_version` branch
 3. Describe changes in the PR
 
 ## License
