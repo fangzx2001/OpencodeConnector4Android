@@ -2,6 +2,28 @@
 
 All notable changes to OConnector will be documented in this file.
 
+## [1.2.0] - 2026-05-10
+
+### Added
+
+- **Side panel** — swipe from right edge (or tap 📁 toolbar button) to open a file browser and model info panel. Navigate project directories, view model/provider details, and track context window usage.
+- **Todo task panel** — overlay panel shows active AI task progress. Badge count in toolbar. Auto-dismisses and sends notification when all tasks complete.
+- **Ask/Confirm bubbles** — when the AI needs permission (tool confirmation) or asks a question, inline bubbles appear between messages and input bar. Permission bubble has Allow Once / Always Allow / Reject. Question bubble has selectable options, custom text input, Submit/Dismiss. Input is blocked while AI waits for response.
+- **Notification deep link** — tapping a notification now navigates directly to the active chat session.
+- **Test infrastructure** — Robolectric + Compose test rule setup for UI testing.
+
+### Fixed
+
+- **Todo auto-dismiss** — panel auto-closes when all tasks are completed; completion notification sent.
+- **Notification navigation** — session tracking ensures deep links open the correct chat.
+- **Gradle daemon hang** — disabled daemon in `gradle.properties` to prevent shell timeout after builds.
+
+### Changed
+
+- Internal refactoring: `ChatUiState` split into `SessionMetaState`, `StreamingDisplayState`, `ChatDisplayState` for cleaner state management.
+- New DTOs: `ToolRef`, `QuestionInfoDto`, `PermissionReplyPayload`, `QuestionReplyPayload` for ask/confirm protocol.
+- 11 new i18n strings (EN + ZH) for permission and question bubble UI.
+
 ## [1.1.2] - 2026-05-07
 
 ### Added
