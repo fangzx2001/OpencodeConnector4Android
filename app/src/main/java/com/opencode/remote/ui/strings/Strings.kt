@@ -214,7 +214,7 @@ data class AppStrings(
 
 val enStrings = AppStrings(
     // Connection
-    appTitle = "OConnector X",
+    appTitle = "OConnector",
     connectSubtitle = "Connect to the OpenCode server on your PC",
     hostLabel = "Server Address",
     hostPlaceholder = "e.g. 192.168.1.100",
@@ -317,8 +317,8 @@ val enStrings = AppStrings(
     // Help
     helpTitle = "Help",
     helpBack = "Back",
-    helpWhatIs = "What is OConnector X",
-    helpWhatIsBody = "OConnector X is an Android remote client that lets you control the OpenCode AI coding assistant running on your PC via your phone or tablet. Your phone and PC must be on the same local network. It supports project and session browsing, chat configuration selection, Todo viewing, context usage details, and update checking.",
+    helpWhatIs = "What is OConnector",
+    helpWhatIsBody = "OConnector is an Android remote client that lets you control the OpenCode AI coding assistant running on your PC via your phone or tablet. Your phone and PC must be on the same local network. It supports project and session browsing, chat configuration selection, Todo viewing, context usage details, and update checking.",
     helpStep1 = "Step 1: Start the PC Server",
     helpStep1Body = "Run the following command in your PC terminal to start the server:",
     helpStep1Code = "opencode serve --hostname=0.0.0.0 --port=4096",
@@ -367,10 +367,10 @@ val enStrings = AppStrings(
     helpSecBullet2 = "Use Tailscale / ZeroTier for remote access",
     helpSecBullet3 = "Never expose the port to the public internet",
     helpSecBullet4 = "Do not use on public WiFi",
-    helpVersion = "OConnector X v${com.opencode.remote.BuildConfig.VERSION_NAME}",
+    helpVersion = "OConnector v${com.opencode.remote.BuildConfig.VERSION_NAME}",
 
     helpUpdateTitle = "Check for Updates",
-    helpUpdateBody = "The app automatically checks GitHub for new versions when you open the connection page. Installed packages are expected to use a signed APK.",
+    helpUpdateBody = "The app automatically checks GitHub for new versions when you open the connection page.",
     helpUpdateBullet1 = "If a new version is available, a download icon (⬇) appears next to the language button",
     helpUpdateBullet2 = "Tap the icon to view the changelog and download the update",
     helpUpdateBullet3 = "The APK will be downloaded to your Downloads folder and installed automatically",
@@ -401,8 +401,8 @@ val enStrings = AppStrings(
     updateChecking = "Checking for updates...",
     updateUpToDate = "Already up to date",
     updateGithubFailed = "GitHub connection failed. Please connect to a suitable network.",
-    notificationRunning = "OConnector X is running",
-    notificationChannelName = "OConnector X Service",
+    notificationRunning = "OConnector is running",
+    notificationChannelName = "OConnector Service",
     notificationChannelDesc = "Keeps connection to server alive",
 )
 
@@ -410,7 +410,7 @@ val enStrings = AppStrings(
 
 val zhStrings = AppStrings(
     // Connection
-    appTitle = "OConnector X",
+    appTitle = "OConnector",
     connectSubtitle = "连接到 PC 上的 OpenCode 服务器",
     hostLabel = "服务器地址",
     hostPlaceholder = "例如: 192.168.1.100",
@@ -513,8 +513,8 @@ val zhStrings = AppStrings(
     // Help
     helpTitle = "使用帮助",
     helpBack = "返回",
-    helpWhatIs = "OConnector X 是什么",
-    helpWhatIsBody = "OConnector X 是一个 Android 远程控制端，让你通过手机/平板操控 PC 上运行的 OpenCode AI 编程助手。手机和 PC 需要在同一局域网内。它支持项目/会话浏览、聊天配置选择、Todo 查看、上下文占用详情以及更新检查。",
+    helpWhatIs = "OConnector 是什么",
+    helpWhatIsBody = "OConnector 是一个 Android 远程控制端，让你通过手机/平板操控 PC 上运行的 OpenCode AI 编程助手。手机和 PC 需要在同一局域网内。它支持项目/会话浏览、聊天配置选择、Todo 查看、上下文占用详情以及更新检查。",
     helpStep1 = "第一步：启动 PC 服务器",
     helpStep1Body = "在 PC 终端运行以下命令启动服务器：",
     helpStep1Code = "opencode serve --hostname=0.0.0.0 --port=4096",
@@ -563,10 +563,10 @@ val zhStrings = AppStrings(
     helpSecBullet2 = "远程访问请使用 Tailscale / ZeroTier 加密通道",
     helpSecBullet3 = "不要将端口暴露到公网",
     helpSecBullet4 = "不要在公共 WiFi 下使用",
-    helpVersion = "OConnector X v${com.opencode.remote.BuildConfig.VERSION_NAME}",
+    helpVersion = "OConnector v${com.opencode.remote.BuildConfig.VERSION_NAME}",
 
     helpUpdateTitle = "检查更新",
-    helpUpdateBody = "打开连接页面时，应用会自动检查 GitHub 上是否有新版本。安装包应使用已签名 APK。",
+    helpUpdateBody = "打开连接页面时，应用会自动检查 GitHub 上是否有新版本。",
     helpUpdateBullet1 = "如果有新版本，语言按钮旁边会出现下载图标 (⬇)",
     helpUpdateBullet2 = "点击图标可查看更新日志并下载更新",
     helpUpdateBullet3 = "APK 会下载到手机的 Downloads 文件夹并自动弹出安装",
@@ -597,7 +597,7 @@ val zhStrings = AppStrings(
     updateChecking = "正在检查更新...",
     updateUpToDate = "已是最新版本",
     updateGithubFailed = "GitHub 连接失败，请接入合适的网络环境",
-    notificationRunning = "OConnector X 正在运行",
-    notificationChannelName = "OConnector X 服务",
+    notificationRunning = "OConnector 正在运行",
+    notificationChannelName = "OConnector 服务",
     notificationChannelDesc = "保持与服务器的连接",
 )

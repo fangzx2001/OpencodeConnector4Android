@@ -16,7 +16,7 @@ class OConnectorApp : Application() {
     private fun createNotificationChannel() {
         val channel = NotificationChannel(
             CHANNEL_ID,
-            "OConnector X Service",
+            "OConnector Service",
             NotificationManager.IMPORTANCE_LOW
         ).apply {
             description = "Keeps connection to server alive"
