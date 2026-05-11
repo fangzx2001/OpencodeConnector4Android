@@ -53,6 +53,8 @@ data class SessionMetaState(
     val sessionDirectory: String? = null,
     val sessionTitle: String? = null,
     val sessionStatus: String? = null,
+    /** Non-null when session has an active revert (undo) — used to filter messages and show redo button. */
+    val revertMessageId: String? = null,
 )
 
 /** Streaming UI state — changes rapidly during AI response (text deltas, agent info). */
@@ -80,9 +82,14 @@ data class ChatDisplayState(
     val panelFiles: List<FileNode> = emptyList(),
     val currentFilePath: String = ".",
     val isLoadingFiles: Boolean = false,
+    // File preview state
+    val expandedFilePath: String? = null,
+    val expandedFileContent: String? = null,
+    val isLoadingFileContent: Boolean = false,
     // Model state
     val selectedModel: ModelInfo? = null,
     val availableModels: List<ModelInfo> = emptyList(),
+    val isLoadingModels: Boolean = false,
     // Context state
     val contextUsageK: String = "0K",
     // Blocking interaction state (permission/question bubbles)
@@ -101,6 +108,7 @@ data class ChatUiState(
     val sessionDirectory get() = sessionMeta.sessionDirectory
     val sessionTitle get() = sessionMeta.sessionTitle
     val sessionStatus get() = sessionMeta.sessionStatus
+    val revertMessageId get() = sessionMeta.revertMessageId
 
     val isStreaming get() = streaming.isStreaming
     val isSending get() = streaming.isSending
@@ -121,8 +129,12 @@ data class ChatUiState(
     val panelFiles get() = chatDisplay.panelFiles
     val currentFilePath get() = chatDisplay.currentFilePath
     val isLoadingFiles get() = chatDisplay.isLoadingFiles
+    val expandedFilePath get() = chatDisplay.expandedFilePath
+    val expandedFileContent get() = chatDisplay.expandedFileContent
+    val isLoadingFileContent get() = chatDisplay.isLoadingFileContent
     val selectedModel get() = chatDisplay.selectedModel
     val availableModels get() = chatDisplay.availableModels
+    val isLoadingModels get() = chatDisplay.isLoadingModels
     val contextUsageK get() = chatDisplay.contextUsageK
     val pendingPermission get() = chatDisplay.pendingPermission
     val pendingQuestion get() = chatDisplay.pendingQuestion
@@ -141,6 +153,8 @@ class ChatViewModel @Inject constructor(
 
     private var sseJob: Job? = null
     private var pollingJob: Job? = null
+    private var streamingWatchdogJob: Job? = null
+    private var lastSseEventTime = 0L  // Timestamp of last SSE event — used for fallback polling
 
     /**
      * IDs of messages that already completed — guards against late [message.updated] re-triggering streaming.
@@ -181,7 +195,22 @@ class ChatViewModel @Inject constructor(
      */
     fun initialize(sessionId: String, directory: String? = null) {
         pollingJob?.cancel()
-        _uiState.update { it.copy(sessionMeta = it.sessionMeta.copy(sessionId = sessionId, sessionDirectory = directory)) }
+        lastSseEventTime = System.currentTimeMillis()
+        _uiState.update {
+            it.copy(
+                sessionMeta = it.sessionMeta.copy(sessionId = sessionId, sessionDirectory = directory),
+                // Reset streaming + display state to prevent stale data from previous session
+                streaming = StreamingDisplayState(),
+                chatDisplay = it.chatDisplay.copy(
+                    isLoading = true,
+                    contextUsageK = "0K",
+                    expandedFilePath = null,
+                    expandedFileContent = null,
+                    isLoadingFileContent = false,
+                    error = null,
+                ),
+            )
+        }
 
         // Track active session for notification deep link
         repository.activeSessionId = sessionId
@@ -256,20 +285,29 @@ class ChatViewModel @Inject constructor(
                         msg.info.time?.completed != null && msg.info.time.completed > 0
                 }
 
-                if (turnCompleted) {
+                // Also check: if the last assistant message has completed timestamp but
+                // no pendingMsgId was stored (e.g. ViewModel killed before message.updated),
+                // the session is idle. Force-clear stale streaming state.
+                val lastAssistantCompleted = !turnCompleted && messages.lastOrNull()?.let { msg ->
+                    msg.role == "assistant" &&
+                        msg.info.time?.completed != null && msg.info.time.completed > 0
+                } == true
+
+                if (turnCompleted || lastAssistantCompleted) {
                     // Turn finished while user was away — clear stale streaming state
-                    Log.d(TAG, "Turn completed while away, clearing streaming state")
+                    Log.d(TAG, "Turn completed while away, clearing streaming state (turnCompleted=$turnCompleted, lastAssistantCompleted=$lastAssistantCompleted)")
                     batchFlushJob?.cancel()
+                    streamingWatchdogJob?.cancel()
                     synchronized(pendingDeltas) { pendingDeltas.clear() }
                     repository.clearStreaming()
-                    _uiState.update { it.copy(chatDisplay = it.chatDisplay.copy(messages = messages, isLoading = false)) }
+                    _uiState.update { it.copy(chatDisplay = it.chatDisplay.copy(messages = messages.applyMessageFilters(it.sessionMeta.revertMessageId), isLoading = false)) }
                 } else {
                     // Turn still in progress (or AI hasn't started responding yet)
                     // Restore full streaming state so the UI shows segments + stop button
                     Log.d(TAG, "Restoring streaming state: segs=${segments.size} pending=${pendingMsgId?.take(8)}")
                     _uiState.update {
                         it.copy(
-                            chatDisplay = it.chatDisplay.copy(messages = messages, isLoading = false),
+                            chatDisplay = it.chatDisplay.copy(messages = messages.applyMessageFilters(it.sessionMeta.revertMessageId), isLoading = false),
                             streaming = it.streaming.copy(
                                 isSending = true,
                                 isStreaming = segments.isNotEmpty(),
@@ -279,10 +317,13 @@ class ChatViewModel @Inject constructor(
                             ),
                         )
                     }
+                    // Start watchdog for restored streaming — if SSE never delivers
+                    // session.idle (server already finished), force-clear after timeout.
+                    startStreamingWatchdog()
                 }
             } else {
                 // No streaming state for this session — normal load
-                _uiState.update { it.copy(chatDisplay = it.chatDisplay.copy(messages = messages, isLoading = false)) }
+                _uiState.update { it.copy(chatDisplay = it.chatDisplay.copy(messages = messages.applyMessageFilters(it.sessionMeta.revertMessageId), isLoading = false)) }
             }
 
             // Compute context usage from loaded messages
@@ -293,8 +334,8 @@ class ChatViewModel @Inject constructor(
             // before streaming state is set, causing premature clearing.
             subscribeToEvents()
 
-            // Start message polling (3s interval, skips during streaming)
-            startMessagePolling(initSessionId)
+            // Start fallback polling (only when SSE stalls)
+            startFallbackPolling(initSessionId)
         }
     }
 
@@ -311,6 +352,7 @@ class ChatViewModel @Inject constructor(
                             sessionTitle = session.title ?: session.slug ?: "${com.opencode.remote.ui.strings.AppLocale.strings.sessionFallback} ${session.id.take(8)}...",
                             sessionStatus = if (isCompleted) "completed" else "active",
                             sessionDirectory = dir,
+                            revertMessageId = session.revert?.messageID,
                         ),
                     )
                 }
@@ -352,6 +394,7 @@ class ChatViewModel @Inject constructor(
         sseJob = viewModelScope.launch {
             try {
                 sseEventBus.events.collect { event ->
+                    lastSseEventTime = System.currentTimeMillis()
                     handleEvent(event)
                 }
             } catch (e: Exception) {
@@ -375,6 +418,7 @@ class ChatViewModel @Inject constructor(
         if (props.sessionID != null && props.sessionID != currentSessionId) return
 
         Log.d(TAG, "SSE event: ${event.payload.type} session=${props.sessionID?.take(8)} msg=${props.messageID?.take(8)}")
+        lastSseEventTime = System.currentTimeMillis()
 
         when (event.payload.type) {
             // ── Streaming text delta (incremental) ──
@@ -460,6 +504,12 @@ class ChatViewModel @Inject constructor(
                             ),
                         )
                     }
+                    // If this update carries token data, refresh context usage immediately.
+                    // This helps when TUI operations cause the server to re-report tokens
+                    // or when the user re-enters a session with streaming in progress.
+                    if (info.tokens?.tokenTotal() != null && info.tokens.tokenTotal() > 0) {
+                        updateContextUsage()
+                    }
                 } else {
                     // Non-assistant roles (e.g. user) — add to local list incrementally via SSE
                     val msgId = info.id ?: return
@@ -473,7 +523,7 @@ class ChatViewModel @Inject constructor(
                     viewModelScope.launch {
                         try {
                             val allMessages = repository.getMessages(_uiState.value.sessionId, _uiState.value.sessionDirectory)
-                            _uiState.update { it.copy(chatDisplay = it.chatDisplay.copy(messages = allMessages)) }
+                            _uiState.update { it.copy(chatDisplay = it.chatDisplay.copy(messages = allMessages.applyMessageFilters(it.sessionMeta.revertMessageId))) }
                         } catch (e: Exception) {
                             Log.w(TAG, "Failed to fetch messages after user message.updated", e)
                         }
@@ -498,30 +548,100 @@ class ChatViewModel @Inject constructor(
                 if ((state.isStreaming || state.isSending) && state.pendingAssistantMessageId != null) {
                     val msgId = state.pendingAssistantMessageId
                     if (msgId != null) completedMessageIds.add(msgId)
-                    Log.d(TAG, "session.idle — turn complete, clearing streaming")
+                    Log.d(TAG, "session.idle — turn complete, reloading messages")
 
-                    _uiState.update {
-                        it.copy(
-                            streaming = it.streaming.copy(
-                                isStreaming = false,
-                                streamingSegments = emptyList(),
-                                streamingAgent = null,
-                                isSending = false,
-                            ),
-                        )
-                    }
-                    deltaLogCounter = 0
-                    partTypeMap.clear()
-                    batchFlushJob?.cancel()
-                    synchronized(pendingDeltas) { pendingDeltas.clear() }
-                    repository.clearStreaming()
-
+                    // DO NOT clear streaming state yet — keep streaming segments visible
+                    // until we've confirmed the replacement message is in the list.
+                    // This prevents the "response disappears" flash.
                     viewModelScope.launch {
+                        try {
+                            // Load messages with retry: the server may not have fully
+                            // persisted the assistant message when session.idle fires.
+                            var freshMessages = repository.getMessages(state.sessionId, state.sessionDirectory)
+                            val expectedId = state.pendingAssistantMessageId
+                            if (expectedId != null) {
+                                var attempts = 0
+                                while (attempts < 3 && !freshMessages.any { it.id == expectedId }) {
+                                    attempts++
+                                    Log.d(TAG, "session.idle: assistant msg not found, retry $attempts/3")
+                                    delay(300L * attempts)
+                                    freshMessages = repository.getMessages(state.sessionId, state.sessionDirectory)
+                                }
+                                // Final check: does the assistant message have actual content?
+                                val assistantMsg = freshMessages.find { it.id == expectedId }
+                                val hasContent = assistantMsg != null && assistantMsg.parts.any { p ->
+                                    p.type in listOf("text", "reasoning") && !p.text.isNullOrBlank()
+                                }
+                                if (!hasContent) {
+                                    Log.w(TAG, "session.idle: assistant message still has no content after retries, keeping streaming visible")
+                                    // Update messages but do NOT clear streaming — fallback polling
+                                    // or next idle event will handle it.
+                                    _uiState.update {
+                                        it.copy(chatDisplay = it.chatDisplay.copy(
+                                            messages = freshMessages.applyMessageFilters(it.sessionMeta.revertMessageId),
+                                        ))
+                                    }
+                                    return@launch
+                                }
+                            }
+
+                            // Content confirmed — now safe to clear everything atomically.
+                            deltaLogCounter = 0
+                            partTypeMap.clear()
+                            batchFlushJob?.cancel()
+                            streamingWatchdogJob?.cancel()
+                            synchronized(pendingDeltas) { pendingDeltas.clear() }
+                            repository.clearStreaming()
+
+                            _uiState.update {
+                                it.copy(
+                                    chatDisplay = it.chatDisplay.copy(messages = freshMessages.applyMessageFilters(it.sessionMeta.revertMessageId)),
+                                    streaming = it.streaming.copy(
+                                        isStreaming = false,
+                                        streamingSegments = emptyList(),
+                                        streamingAgent = null,
+                                        isSending = false,
+                                    ),
+                                )
+                            }
+                        } catch (e: Exception) {
+                            Log.w(TAG, "Failed to reload messages after session.idle", e)
+                            // On network error, still clear streaming to un-stuck the UI
+                            deltaLogCounter = 0
+                            partTypeMap.clear()
+                            batchFlushJob?.cancel()
+                            streamingWatchdogJob?.cancel()
+                            synchronized(pendingDeltas) { pendingDeltas.clear() }
+                            repository.clearStreaming()
+                            _uiState.update {
+                                it.copy(streaming = it.streaming.copy(
+                                    isStreaming = false,
+                                    streamingSegments = emptyList(),
+                                    streamingAgent = null,
+                                    isSending = false,
+                                ))
+                            }
+                        }
                         loadTodoList()
                         updateContextUsage()
                     }
                 }
+                // Always reload session info on idle — TUI may have caused state changes
+                // (undo/redo, compaction, etc.) that we need to reflect.
                 loadSessionInfo()
+                // If we weren't streaming (TUI drove the conversation), still refresh
+                // messages + context since TUI activity changed the message list.
+                if (!_uiState.value.isStreaming && !_uiState.value.isSending) {
+                    viewModelScope.launch {
+                        try {
+                            val fresh = repository.getMessages(_uiState.value.sessionId, _uiState.value.sessionDirectory)
+                            _uiState.update { it.copy(chatDisplay = it.chatDisplay.copy(messages = fresh.applyMessageFilters(it.sessionMeta.revertMessageId))) }
+                        } catch (e: Exception) {
+                            Log.w(TAG, "Failed to refresh messages on idle", e)
+                        }
+                        updateContextUsage()
+                    }
+                }
             }
 
             // ── Session compacted — context reset ──
@@ -530,7 +650,7 @@ class ChatViewModel @Inject constructor(
                 viewModelScope.launch {
                     try {
                         val messages = repository.getMessages(_uiState.value.sessionId, _uiState.value.sessionDirectory)
-                        _uiState.update { it.copy(chatDisplay = it.chatDisplay.copy(messages = messages)) }
+                        _uiState.update { it.copy(chatDisplay = it.chatDisplay.copy(messages = messages.applyMessageFilters(it.sessionMeta.revertMessageId))) }
                         updateContextUsage()
                     } catch (e: Exception) {
                         Log.e(TAG, "Failed to reload messages after compaction", e)
@@ -539,7 +659,16 @@ class ChatViewModel @Inject constructor(
             }
 
             // ── Session events ──
-            "session.updated", "session.status" -> {
+            "session.updated" -> {
+                loadSessionInfo()
+            }
+
+            // ── Session status (busy/idle transition) ──
+            // NOTE: The server emits session.status { type: "idle" } AND session.idle
+            // at the same time. We handle the completion logic ONLY in session.idle
+            // to avoid duplicate message reloads racing against each other.
+            // session.status is used only for metadata refresh.
+            "session.status" -> {
                 loadSessionInfo()
             }
 
@@ -697,11 +826,28 @@ class ChatViewModel @Inject constructor(
         if (text.isEmpty()) return
         if (_uiState.value.isBlocked) return
 
+        val state = _uiState.value
+
         // When user hasn't explicitly picked an agent, send null to let the server
         // use its configured default (from opencode.json). DO NOT try to guess via
         // mode=="primary" — only show main agents (mode != subagent && !hidden),
         // matching TUI tab-switching behavior.
         val agentName = _uiState.value.selectedAgent
+
+        // If stuck in stale streaming state (e.g. app killed during generation,
+        // missed session.idle), abort the server-side generation and clear local state
+        // before sending a new message. The server coalesces concurrent prompt_async
+        // calls, so a stale session would swallow our new prompt without feedback.
+        if (state.isStreaming || state.isSending) {
+            Log.w(TAG, "sendMessage() while streaming — aborting stale state before new send")
+            viewModelScope.launch {
+                try { repository.abortSession(state.sessionId, state.sessionDirectory) } catch (_: Exception) {}
+            }
+            batchFlushJob?.cancel()
+            synchronized(pendingDeltas) { pendingDeltas.clear() }
+            repository.clearStreaming()
+            streamingWatchdogJob?.cancel()
+        }
 
         // Clear completed IDs from previous turn — new conversation turn starting
         completedMessageIds.clear()
@@ -737,13 +883,19 @@ class ChatViewModel @Inject constructor(
         viewModelScope.launch {
             try {
                 repository.beginStreaming(_uiState.value.sessionId, agentName)
-                repository.sendMessage(_uiState.value.sessionId, text, _uiState.value.selectedAgent, _uiState.value.sessionDirectory)
+                val model = _uiState.value.selectedModel
+                repository.sendMessage(
+                    _uiState.value.sessionId, text, _uiState.value.selectedAgent,
+                    model?.providerID, model?.id,
+                    _uiState.value.sessionDirectory,
+                )
                 // prompt_async returns 204 immediately — SSE events drive the rest
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to send message", e)
                 batchFlushJob?.cancel()
                 synchronized(pendingDeltas) { pendingDeltas.clear() }
                 repository.clearStreaming()
+                streamingWatchdogJob?.cancel()
                 val s = com.opencode.remote.ui.strings.AppLocale.strings
                 _uiState.update {
                     it.copy(
@@ -753,6 +905,10 @@ class ChatViewModel @Inject constructor(
                 }
             }
         }
+
+        // Start timeout watchdog — if no SSE events arrive within 120s, assume
+        // the server is stuck (missed session.idle) and force-clear streaming state.
+        startStreamingWatchdog()
     }
 
     fun abortSession() {
@@ -769,6 +925,108 @@ class ChatViewModel @Inject constructor(
                 Log.e(TAG, "Failed to abort session", e)
                 val s = com.opencode.remote.ui.strings.AppLocale.strings
                 _uiState.update { it.copy(chatDisplay = it.chatDisplay.copy(error = s.errAbortFailed.replace("%s", e.localizedMessage ?: e.javaClass.simpleName))) }
+            }
+        }
+    }
+
+    /**
+     * Undo the last user message.
+     * 1. Abort any in-progress generation
+     * 2. Find last user message
+     * 3. Call POST /session/{id}/revert with that messageID
+     * 4. Reload messages (server soft-hides reverted messages)
+     * 5. Restore the undone text to the input box
+     */
+    fun undoLastMessage() {
+        viewModelScope.launch {
+            try {
+                val state = _uiState.value
+
+                // 1. Abort if streaming
+                if (state.isStreaming || state.isSending) {
+                    try { repository.abortSession(state.sessionId, state.sessionDirectory) } catch (_: Exception) {}
+                    batchFlushJob?.cancel()
+                    synchronized(pendingDeltas) { pendingDeltas.clear() }
+                    repository.clearStreaming()
+                    _uiState.update {
+                        it.copy(streaming = it.streaming.copy(isSending = false, isStreaming = false, streamingAgent = null, streamingSegments = emptyList()))
+                    }
+                }
+
+                // 2. Find last user message (filter out already-reverted ones)
+                val revertId = state.revertMessageId
+                val messages = state.messages
+                val lastUserMsg = messages
+                    .filter { it.role == "user" }
+                    .filter { revertId == null || it.id < revertId }
+                    .lastOrNull()
+                if (lastUserMsg == null) {
+                    Log.w(TAG, "No user message to undo")
+                    return@launch
+                }
+
+                // 3. Call revert
+                val updatedSession = repository.revertSession(state.sessionId, lastUserMsg.id, state.sessionDirectory)
+
+                // 4. Extract the user's text to restore into input
+                val userText = lastUserMsg.parts
+                    .filter { it.type == "text" }
+                    .mapNotNull { it.text }
+                    .joinToString("\n")
+                    .ifBlank { lastUserMsg.parts.firstOrNull()?.text ?: "" }
+
+                // 5. Reload messages (server filters by revert marker)
+                val freshMessages = repository.getMessages(state.sessionId, state.sessionDirectory)
+
+                _uiState.update {
+                    it.copy(
+                        sessionMeta = it.sessionMeta.copy(
+                            revertMessageId = updatedSession.revert?.messageID,
+                        ),
+                        chatDisplay = it.chatDisplay.copy(
+                            messages = freshMessages.filterReverted(updatedSession.revert?.messageID).trimToLatest(),
+                            inputText = userText,
+                        ),
+                    )
+                }
+                Log.d(TAG, "Undo: reverted message ${lastUserMsg.id.take(8)}")
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to undo message", e)
+                val s = com.opencode.remote.ui.strings.AppLocale.strings
+                _uiState.update { it.copy(chatDisplay = it.chatDisplay.copy(error = s.errUndoFailed.replace("%s", e.localizedMessage ?: e.javaClass.simpleName))) }
+            }
+        }
+    }
+
+    /**
+     * Redo — restore all reverted messages.
+     * Calls POST /session/{id}/unrevert and reloads.
+     */
+    fun redoLastUndo() {
+        viewModelScope.launch {
+            try {
+                val state = _uiState.value
+                if (state.revertMessageId == null) return@launch
+
+                val updatedSession = repository.unrevertSession(state.sessionId, state.sessionDirectory)
+                val freshMessages = repository.getMessages(state.sessionId, state.sessionDirectory)
+
+                _uiState.update {
+                    it.copy(
+                        sessionMeta = it.sessionMeta.copy(
+                            revertMessageId = updatedSession.revert?.messageID,
+                        ),
+                        chatDisplay = it.chatDisplay.copy(
+                            messages = freshMessages.filterReverted(updatedSession.revert?.messageID).trimToLatest(),
+                            inputText = "",
+                        ),
+                    )
+                }
+                Log.d(TAG, "Redo: restored reverted messages")
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to redo", e)
+                val s = com.opencode.remote.ui.strings.AppLocale.strings
+                _uiState.update { it.copy(chatDisplay = it.chatDisplay.copy(error = s.errRedoFailed.replace("%s", e.localizedMessage ?: e.javaClass.simpleName))) }
             }
         }
     }
@@ -793,8 +1051,13 @@ class ChatViewModel @Inject constructor(
 
     fun setPanelOpen(open: Boolean) {
         _uiState.update { it.copy(chatDisplay = it.chatDisplay.copy(isPanelOpen = open)) }
-        if (open && _uiState.value.panelFiles.isEmpty()) {
-            navigateToDirectory(".")
+        if (open) {
+            if (_uiState.value.panelFiles.isEmpty()) {
+                navigateToDirectory(".")
+            }
+            if (_uiState.value.availableModels.isEmpty()) {
+                loadModels()
+            }
         }
     }
 
@@ -818,6 +1081,39 @@ class ChatViewModel @Inject constructor(
         navigateToDirectory(parent)
     }
 
+    fun toggleFilePreview(file: FileNode) {
+        val current = _uiState.value.expandedFilePath
+        if (current == file.path) {
+            // Collapse
+            _uiState.update { it.copy(chatDisplay = it.chatDisplay.copy(
+                expandedFilePath = null,
+                expandedFileContent = null,
+            )) }
+        } else {
+            // Expand — load content
+            _uiState.update { it.copy(chatDisplay = it.chatDisplay.copy(
+                expandedFilePath = file.path,
+                expandedFileContent = null,
+                isLoadingFileContent = true,
+            )) }
+            viewModelScope.launch {
+                try {
+                    val result = repository.readFileContent(file.path, _uiState.value.sessionDirectory)
+                    _uiState.update { it.copy(chatDisplay = it.chatDisplay.copy(
+                        expandedFileContent = result.content,
+                        isLoadingFileContent = false,
+                    )) }
+                } catch (e: Exception) {
+                    Log.w(TAG, "Failed to read file: ${file.path}", e)
+                    _uiState.update { it.copy(chatDisplay = it.chatDisplay.copy(
+                        expandedFileContent = "Error: ${e.message}",
+                        isLoadingFileContent = false,
+                    )) }
+                }
+            }
+        }
+    }
+
     fun refreshFiles() {
         navigateToDirectory(_uiState.value.currentFilePath)
     }
@@ -825,13 +1121,16 @@ class ChatViewModel @Inject constructor(
     // ── Model Methods ──────────────────────────────────────────────────
 
     fun loadModels() {
+        if (_uiState.value.isLoadingModels) return  // already loading
+        _uiState.update { it.copy(chatDisplay = it.chatDisplay.copy(isLoadingModels = true)) }
         viewModelScope.launch {
             try {
                 repository.listProviders()
                 val models = repository.getCachedModels()
-                _uiState.update { it.copy(chatDisplay = it.chatDisplay.copy(availableModels = models)) }
+                _uiState.update { it.copy(chatDisplay = it.chatDisplay.copy(availableModels = models, isLoadingModels = false)) }
             } catch (e: Exception) {
                 Log.w(TAG, "Failed to load models", e)
+                _uiState.update { it.copy(chatDisplay = it.chatDisplay.copy(isLoadingModels = false)) }
             }
         }
     }
@@ -857,15 +1156,33 @@ class ChatViewModel @Inject constructor(
     }
 
     fun updateContextUsage() {
+        // Walk backwards to find the last assistant message WITH actual token data.
+        // This handles edge cases where the most recent assistant message has no tokens
+        // (e.g., TUI triggered operations, provider didn't report usage, etc.)
         val messages = _uiState.value.messages
-        val totalTokens = messages
-            .filter { it.role == "assistant" }
-            .sumOf { msg ->
-                val input = msg.info.tokens?.input ?: 0
-                val cacheRead = msg.info.tokens?.cache?.read ?: 0
-                (input + cacheRead).toLong()
+        val lastAssistant = messages.lastOrNull { it.role == "assistant" }
+        val tokenCount = lastAssistant?.let { msg ->
+            val infoTotal = msg.info.tokens?.tokenTotal() ?: 0
+            if (infoTotal > 0) infoTotal
+            else msg.parts.sumOf { it.tokens?.tokenTotal() ?: 0 }
+        } ?: 0
+
+        // If the last assistant has zero tokens, walk backwards to find one with data
+        val resolvedCount = if (tokenCount > 0) tokenCount else {
+            var found = 0
+            for (msg in messages.reversed()) {
+                if (msg.role != "assistant") continue
+                val total = msg.info.tokens?.tokenTotal() ?: 0
+                val partsTotal = if (total > 0) total else msg.parts.sumOf { it.tokens?.tokenTotal() ?: 0 }
+                if (partsTotal > 0) {
+                    found = partsTotal
+                    break
+                }
             }
-        val usageK = if (totalTokens > 0) "${totalTokens / 1000}K" else "0K"
+            found
+        }
+
+        val usageK = if (resolvedCount > 0) "${resolvedCount / 1000}K" else "0K"
         _uiState.update { it.copy(chatDisplay = it.chatDisplay.copy(contextUsageK = usageK)) }
     }
 
@@ -968,40 +1285,114 @@ class ChatViewModel @Inject constructor(
         notificationManager.notify(TODO_COMPLETED_NOTIFICATION_ID, notification)
     }
 
+    /** Trim message list to the latest [maxCount] messages to prevent memory bloat on long conversations. */
+    private fun List<MessageInfo>.trimToLatest(maxCount: Int = 150): List<MessageInfo> {
+        return if (size > maxCount) takeLast(maxCount) else this
+    }
+
+    /** Filter out messages at or after the revert point (undo hides them). */
+    private fun List<MessageInfo>.filterReverted(revertMessageId: String?): List<MessageInfo> {
+        if (revertMessageId == null) return this
+        return filter { it.id < revertMessageId }
+    }
+
+    /** Apply both revert filtering and trim in one call. */
+    private fun List<MessageInfo>.applyMessageFilters(revertMessageId: String?): List<MessageInfo> =
+        filterReverted(revertMessageId).trimToLatest()
+
     /**
-     * Launches a coroutine that polls for new messages every 3 seconds.
-     * Skips during streaming to avoid races with delta updates.
-     * Cancels itself if the session changes (stale coroutine guard).
+     * Fallback polling: only checks for new messages when SSE appears to have stalled
+     * (no events received for 15 seconds). This avoids redundant API calls while SSE
+     * is actively streaming, reducing server load and battery usage.
      */
-    private fun startMessagePolling(expectedSessionId: String) {
+    private fun startFallbackPolling(expectedSessionId: String) {
         pollingJob?.cancel()
         pollingJob = viewModelScope.launch {
             while (isActive) {
-                delay(3000)
-                // Skip during streaming to avoid race with delta events
-                if (_uiState.value.isStreaming) continue
-                // Skip if session changed (stale coroutine guard)
+                delay(5000)  // Check every 5 seconds
                 if (_uiState.value.sessionId != expectedSessionId) break
+                if (_uiState.value.isStreaming) continue  // Still streaming via SSE, skip
+
+                // Only poll if no SSE events received in last 15 seconds
+                val timeSinceLastEvent = System.currentTimeMillis() - lastSseEventTime
+                if (timeSinceLastEvent < 15_000) continue
+
                 try {
                     val freshMessages = repository.getMessages(
                         _uiState.value.sessionId,
                         _uiState.value.sessionDirectory,
-                        limit = 5,  // Lightweight: only check latest messages
+                        limit = 5,
                     )
-                    // Only update if the latest message ID differs from what we have
                     val currentMessages = _uiState.value.messages
                     val currentLatestId = currentMessages.lastOrNull()?.id
                     val freshLatestId = freshMessages.lastOrNull()?.id
                     if (freshLatestId != null && freshLatestId != currentLatestId) {
-                        Log.d(TAG, "Polling detected new message: $freshLatestId (was $currentLatestId)")
-                        // Fetch full list since there's a change
+                        Log.d(TAG, "Fallback polling detected new message: $freshLatestId")
                         val fullMessages = repository.getMessages(_uiState.value.sessionId, _uiState.value.sessionDirectory)
-                        _uiState.update { it.copy(chatDisplay = it.chatDisplay.copy(messages = fullMessages)) }
+                        _uiState.update { it.copy(chatDisplay = it.chatDisplay.copy(messages = fullMessages.applyMessageFilters(it.sessionMeta.revertMessageId))) }
                         updateContextUsage()
                     }
                 } catch (e: Exception) {
-                    Log.w(TAG, "Message polling error", e)
+                    Log.w(TAG, "Fallback polling error", e)
                 }
+            }
+        }
+    }
+
+    /**
+     * Watchdog that force-clears streaming state if no SSE events arrive for 120s.
+     * Prevents permanent UI freeze when session.idle is missed (e.g. app killed
+     * during generation, SSE reconnection gap, server crash).
+     */
+    private fun startStreamingWatchdog() {
+        streamingWatchdogJob?.cancel()
+        streamingWatchdogJob = viewModelScope.launch {
+            while (isActive) {
+                delay(15_000)  // Check every 15s
+                val state = _uiState.value
+                if (!state.isStreaming && !state.isSending) {
+                    // Not streaming — watchdog not needed
+                    break
+                }
+                // Reset if any SSE event arrived recently
+                val timeSinceEvent = System.currentTimeMillis() - lastSseEventTime
+                if (timeSinceEvent < 120_000) continue  // SSE is still active
+
+                // 120s with no SSE events while stuck in sending/streaming — force clear
+                Log.w(TAG, "Streaming watchdog: no SSE events for 120s, force-clearing stuck state")
+                try { repository.abortSession(state.sessionId, state.sessionDirectory) } catch (_: Exception) {}
+                batchFlushJob?.cancel()
+                synchronized(pendingDeltas) { pendingDeltas.clear() }
+                repository.clearStreaming()
+                // Reload messages to get the latest state from server
+                try {
+                    val fresh = repository.getMessages(state.sessionId, state.sessionDirectory)
+                    _uiState.update {
+                        it.copy(
+                            streaming = it.streaming.copy(
+                                isStreaming = false,
+                                isSending = false,
+                                streamingSegments = emptyList(),
+                                streamingAgent = null,
+                                pendingAssistantMessageId = null,
+                            ),
+                            chatDisplay = it.chatDisplay.copy(
+                                messages = fresh.applyMessageFilters(it.sessionMeta.revertMessageId),
+                            ),
+                        )
+                    }
+                } catch (e: Exception) {
+                    // Even reload failed — just clear streaming state
+                    _uiState.update {
+                        it.copy(streaming = it.streaming.copy(
+                            isStreaming = false, isSending = false,
+                            streamingSegments = emptyList(), streamingAgent = null,
+                            pendingAssistantMessageId = null,
+                        ))
+                    }
+                }
+                updateContextUsage()
+                break
             }
         }
     }
@@ -1011,5 +1402,6 @@ class ChatViewModel @Inject constructor(
         batchFlushJob?.cancel()
         pollingJob?.cancel()
         sseJob?.cancel()
+        streamingWatchdogJob?.cancel()
     }
 }

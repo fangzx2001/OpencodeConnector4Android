@@ -97,12 +97,12 @@ class SidePanelRepositoryTest {
     fun `listProviders caches models on first call and returns empty on second`() = runTest {
         val providerList = ProviderList(
             providers = listOf(
-                ProviderInfo("openai", "OpenAI", models = listOf(
-                    ModelInfo("gpt-4o", "GPT-4o"),
-                    ModelInfo("gpt-4o-mini", "GPT-4o Mini"),
+                ProviderInfo("openai", "OpenAI", models = mapOf(
+                    "gpt-4o" to ModelInfo("gpt-4o", "GPT-4o"),
+                    "gpt-4o-mini" to ModelInfo("gpt-4o-mini", "GPT-4o Mini"),
                 )),
-                ProviderInfo("anthropic", "Anthropic", models = listOf(
-                    ModelInfo("claude-3-opus", "Claude 3 Opus"),
+                ProviderInfo("anthropic", "Anthropic", models = mapOf(
+                    "claude-3-opus" to ModelInfo("claude-3-opus", "Claude 3 Opus"),
                 )),
             ),
         )
@@ -155,8 +155,8 @@ class SidePanelRepositoryTest {
         )
         val providerList = ProviderList(
             providers = listOf(
-                ProviderInfo("openai", "OpenAI", models = listOf(models[0])),
-                ProviderInfo("anthropic", "Anthropic", models = listOf(models[1])),
+                ProviderInfo("openai", "OpenAI", models = mapOf("gpt-4o" to models[0])),
+                ProviderInfo("anthropic", "Anthropic", models = mapOf("claude-3-opus" to models[1])),
             ),
         )
         coEvery { apiClient.listProviders() } returns providerList

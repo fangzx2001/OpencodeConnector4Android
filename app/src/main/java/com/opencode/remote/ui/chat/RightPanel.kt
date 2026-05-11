@@ -1,26 +1,21 @@
 package com.opencode.remote.ui.chat
 
-import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.width
-import androidx.compose.material3.HorizontalDivider
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.opencode.remote.data.api.dto.FileNode
-import com.opencode.remote.data.api.dto.ModelInfo
 
 @Composable
 fun RightPanel(
@@ -28,17 +23,18 @@ fun RightPanel(
     currentPath: String,
     onNavigateToDirectory: (String) -> Unit,
     isLoadingFiles: Boolean,
-    selectedModel: ModelInfo?,
-    availableModels: List<ModelInfo>,
-    onSelectModel: (ModelInfo) -> Unit,
-    isLoadingModels: Boolean,
-    contextUsageK: String,
     modifier: Modifier = Modifier,
+    onNavigateUp: (() -> Unit)? = null,
+    expandedFilePath: String? = null,
+    expandedFileContent: String? = null,
+    isLoadingFileContent: Boolean = false,
+    onToggleFilePreview: ((FileNode) -> Unit)? = null,
 ) {
     Surface(
         modifier = modifier
             .fillMaxHeight()
-            .width(280.dp),
+            .width(280.dp)
+            .windowInsetsPadding(WindowInsets.statusBars),
         color = MaterialTheme.colorScheme.surfaceContainer,
         tonalElevation = 2.dp,
     ) {
@@ -65,29 +61,15 @@ fun RightPanel(
                 currentPath = currentPath,
                 onNavigateToDirectory = onNavigateToDirectory,
                 isLoading = isLoadingFiles,
+                onNavigateUp = onNavigateUp,
+                expandedFilePath = expandedFilePath,
+                expandedFileContent = expandedFileContent,
+                isLoadingFileContent = isLoadingFileContent,
+                onToggleFilePreview = onToggleFilePreview,
                 modifier = Modifier
                     .weight(1f)
                     .fillMaxWidth(),
             )
-
-            HorizontalDivider()
-
-            // Bottom bar
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 12.dp, vertical = 8.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                ModelSelector(
-                    selectedModel = selectedModel,
-                    availableModels = availableModels,
-                    onSelectModel = onSelectModel,
-                    isLoading = isLoadingModels,
-                )
-                ContextUsageDisplay(usageK = contextUsageK)
-            }
         }
     }
 }

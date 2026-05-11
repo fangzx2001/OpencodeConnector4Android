@@ -42,11 +42,13 @@ interface OConnectorRepository {
     suspend fun deleteSession(sessionId: String, directory: String? = null)
     suspend fun forkSession(sessionId: String, directory: String? = null): CreateSessionResponse
     suspend fun abortSession(sessionId: String, directory: String? = null)
+    suspend fun revertSession(sessionId: String, messageID: String, directory: String? = null): SessionInfo
+    suspend fun unrevertSession(sessionId: String, directory: String? = null): SessionInfo
 
     // ─── Message Operations ──────────────────────────────────────────
 
     suspend fun getMessages(sessionId: String, directory: String? = null, limit: Int? = null): List<MessageInfo>
-    suspend fun sendMessage(sessionId: String, message: String, agent: String? = null, directory: String? = null)
+    suspend fun sendMessage(sessionId: String, message: String, agent: String? = null, providerID: String? = null, modelID: String? = null, directory: String? = null)
 
     // ─── Permission / Question Replies ──────────────────────────────
 
@@ -75,6 +77,7 @@ interface OConnectorRepository {
     // ─── Files ──────────────────────────────────────────────────────────
 
     suspend fun listFiles(path: String, directory: String? = null): List<FileNode>
+    suspend fun readFileContent(path: String, directory: String? = null): FileContent
 
     // ─── Config / Providers ─────────────────────────────────────────────
 
@@ -181,13 +184,19 @@ class OConnectorRepositoryImpl @Inject constructor(
     override suspend fun abortSession(sessionId: String, directory: String?) =
         requireClient().abortSession(sessionId, directory)
 
+    override suspend fun revertSession(sessionId: String, messageID: String, directory: String?): SessionInfo =
+        requireClient().revertSession(sessionId, messageID, directory)
+
+    override suspend fun unrevertSession(sessionId: String, directory: String?): SessionInfo =
+        requireClient().unrevertSession(sessionId, directory)
+
     // ─── Message Operations ──────────────────────────────────────────
 
     override suspend fun getMessages(sessionId: String, directory: String?, limit: Int?): List<MessageInfo> =
         requireClient().getMessages(sessionId, directory, limit)
 
-    override suspend fun sendMessage(sessionId: String, message: String, agent: String?, directory: String?) =
-        requireClient().sendMessage(sessionId, message, agent, directory)
+    override suspend fun sendMessage(sessionId: String, message: String, agent: String?, providerID: String?, modelID: String?, directory: String?) =
+        requireClient().sendMessage(sessionId, message, agent, providerID, modelID, directory)
 
     // ─── Permission / Question Replies ──────────────────────────────
 
@@ -240,6 +249,9 @@ class OConnectorRepositoryImpl @Inject constructor(
     override suspend fun listFiles(path: String, directory: String?): List<FileNode> =
         requireClient().listFiles(path, directory)
 
+    override suspend fun readFileContent(path: String, directory: String?): FileContent =
+        requireClient().readFileContent(path, directory)
+
     // ─── Config / Providers ─────────────────────────────────────────────
 
     override suspend fun listProviders(): ProviderList {
@@ -248,7 +260,7 @@ class OConnectorRepositoryImpl @Inject constructor(
             return ProviderList()
         }
         val providers = requireClient().listProviders()
-        cachedModels = providers.providers.flatMap { it.models }
+        cachedModels = providers.providers.flatMap { it.models.values }
         modelsCacheTime = System.currentTimeMillis()
         return providers
     }

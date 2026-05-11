@@ -232,17 +232,17 @@ class SidePanelDtoTest {
                 {
                     "id": "openai",
                     "name": "OpenAI",
-                    "models": [
-                        {"id": "gpt-4o", "name": "GPT-4o"},
-                        {"id": "gpt-4o-mini", "name": "GPT-4o Mini"}
-                    ]
+                    "models": {
+                        "gpt-4o": {"id": "gpt-4o", "name": "GPT-4o"},
+                        "gpt-4o-mini": {"id": "gpt-4o-mini", "name": "GPT-4o Mini"}
+                    }
                 },
                 {
                     "id": "anthropic",
                     "name": "Anthropic",
-                    "models": [
-                        {"id": "claude-3-opus", "name": "Claude 3 Opus"}
-                    ]
+                    "models": {
+                        "claude-3-opus": {"id": "claude-3-opus", "name": "Claude 3 Opus"}
+                    }
                 }
             ]
         }"""
@@ -253,17 +253,14 @@ class SidePanelDtoTest {
         assertEquals("openai", list.providers[0].id)
         assertEquals("OpenAI", list.providers[0].name)
         assertEquals(2, list.providers[0].models.size)
-        assertEquals("gpt-4o", list.providers[0].models[0].id)
-        assertEquals("GPT-4o", list.providers[0].models[0].name)
-        assertEquals("gpt-4o-mini", list.providers[0].models[1].id)
-        assertEquals("GPT-4o Mini", list.providers[0].models[1].name)
+        assertEquals("GPT-4o", list.providers[0].models["gpt-4o"]?.name)
+        assertEquals("GPT-4o Mini", list.providers[0].models["gpt-4o-mini"]?.name)
 
         // Second provider
         assertEquals("anthropic", list.providers[1].id)
         assertEquals("Anthropic", list.providers[1].name)
         assertEquals(1, list.providers[1].models.size)
-        assertEquals("claude-3-opus", list.providers[1].models[0].id)
-        assertEquals("Claude 3 Opus", list.providers[1].models[0].name)
+        assertEquals("Claude 3 Opus", list.providers[1].models["claude-3-opus"]?.name)
     }
 
     @Test

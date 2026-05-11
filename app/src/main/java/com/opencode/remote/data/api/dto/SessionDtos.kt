@@ -23,6 +23,19 @@ data class SessionInfo(
     @SerialName("parentID")
     val parentID: String? = null,
     val time: SessionTime? = null,
+    /** Revert state — non-null when the session has an active undo. */
+    val revert: SessionRevert? = null,
+)
+
+/** Revert marker on a session (from POST /session/{id}/revert). */
+@Serializable
+data class SessionRevert(
+    @SerialName("messageID")
+    val messageID: String? = null,
+    @SerialName("partID")
+    val partID: String? = null,
+    val snapshot: String? = null,
+    val diff: String? = null,
 )
 
 @Serializable
@@ -64,6 +77,13 @@ data class CreateSessionResponse(
 )
 
 // session 列表就是 List<SessionInfo>，无需额外包装
+
+/** Request body for POST /session/{id}/revert */
+@Serializable
+data class RevertRequest(
+    @SerialName("messageID")
+    val messageID: String,
+)
 
 /**
  * 实际 API: GET /session/{id}/message 返回的消息
@@ -119,7 +139,21 @@ data class MessageTokens(
     val output: Int? = null,
     val reasoning: Int? = null,
     val cache: CacheTokens? = null,
-)
+    @SerialName("cacheRead")
+    val cacheRead: Int? = null,
+    @SerialName("cacheWrite")
+    val cacheWrite: Int? = null,
+) {
+    /** Comprehensive token sum: prefers `total`, otherwise sums all available fields. */
+    fun tokenTotal(): Int {
+        if (total != null && total > 0) return total
+        return (input ?: 0) +
+            (output ?: 0) +
+            (reasoning ?: 0) +
+            (cacheRead ?: cache?.read ?: 0) +
+            (cacheWrite ?: cache?.write ?: 0)
+    }
+}
 
 @Serializable
 data class CacheTokens(
@@ -182,6 +216,15 @@ data class ToolState(
 data class SendMessageRequest(
     val parts: List<SendMessagePart>,
     val agent: String? = null,
+    /** Nested model reference — server expects { "model": { "providerID": "...", "modelID": "..." } } */
+    val model: ModelRef? = null,
+)
+
+/** Model reference matching the server's PromptInput.model (ModelRef schema). */
+@Serializable
+data class ModelRef(
+    val providerID: String? = null,
+    val modelID: String? = null,
 )
 
 @Serializable

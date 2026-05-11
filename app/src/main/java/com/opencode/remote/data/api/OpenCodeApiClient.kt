@@ -194,6 +194,26 @@ class OConnectorApiClient @Inject constructor(
         }
     }
 
+    /** POST /session/{id}/revert — undo last user message (soft-hide, file rollback on server) */
+    suspend fun revertSession(id: String, messageID: String, directory: String? = null): SessionInfo =
+        client.post("/session/$id/revert") {
+            setBody(RevertRequest(messageID = messageID))
+            directory?.let {
+                parameter("directory", it)
+                header("x-opencode-directory", encDir(it))
+            }
+        }.body<SessionInfo>()
+
+    /** POST /session/{id}/unrevert — redo (restore reverted messages + file snapshot) */
+    suspend fun unrevertSession(id: String, directory: String? = null): SessionInfo =
+        client.post("/session/$id/unrevert") {
+            setBody("{}")
+            directory?.let {
+                parameter("directory", it)
+                header("x-opencode-directory", encDir(it))
+            }
+        }.body<SessionInfo>()
+
     // ─── Messages ──────────────────────────────────────────────────────
 
     /**
@@ -229,9 +249,10 @@ class OConnectorApiClient @Inject constructor(
      * Body: {"parts":[{"type":"text","text":"user message"}],"agent":"optional"}
      * AI 生成通过 SSE 事件流实时推送（message.part.delta, message.completed)
      */
-    suspend fun sendMessage(sessionId: String, text: String, agent: String? = null, directory: String? = null) {
+    suspend fun sendMessage(sessionId: String, text: String, agent: String? = null, providerID: String? = null, modelID: String? = null, directory: String? = null) {
+        val modelRef = if (providerID != null || modelID != null) ModelRef(providerID, modelID) else null
         client.post("/session/$sessionId/prompt_async") {
-            setBody(SendMessageRequest(parts = listOf(SendMessagePart(text = text)), agent = agent))
+            setBody(SendMessageRequest(parts = listOf(SendMessagePart(text = text)), agent = agent, model = modelRef))
             directory?.let {
                 parameter("directory", it)
                 header("x-opencode-directory", encDir(it))
@@ -384,6 +405,16 @@ class OConnectorApiClient @Inject constructor(
                 header("x-opencode-directory", encDir(it))
             }
         }.body<List<FileNode>>()
+
+    /** GET /file/content?path=... → returns file content as FileContent */
+    suspend fun readFileContent(path: String, directory: String? = null): FileContent =
+        client.get("/file/content") {
+            parameter("path", path)
+            directory?.let {
+                parameter("directory", it)
+                header("x-opencode-directory", encDir(it))
+            }
+        }.body<FileContent>()
 
     // ─── Config / Providers ─────────────────────────────────────────────
 

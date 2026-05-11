@@ -1,5 +1,6 @@
 package com.opencode.remote.ui.chat
 
+import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
@@ -31,6 +32,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
+import com.opencode.remote.data.api.dto.MessageInfo
+import com.opencode.remote.data.api.dto.MessageInfoData
 import com.opencode.remote.ui.components.ErrorSnackbar
 import com.opencode.remote.ui.strings.AppLocale
 import androidx.lifecycle.compose.LifecycleResumeEffect
@@ -50,19 +53,20 @@ fun ChatScreen(
     val s = AppLocale.strings
     val density = LocalDensity.current
 
-    // Panel gesture tracking
-    var isGestureFromEdge by remember { mutableStateOf(false) }
+    // Panel gesture tracking — cumulative horizontal drag for open/close
+    var cumulativeDragX by remember { mutableFloatStateOf(0f) }
+    val dragThresholdPx = with(density) { 40.dp.toPx() }
 
     // Panel dimensions and animations
     val panelWidthDp = 280.dp
     val panelOffset by animateDpAsState(
         targetValue = if (uiState.isPanelOpen) 0.dp else panelWidthDp,
-        animationSpec = tween(durationMillis = 300),
+        animationSpec = tween(durationMillis = 350, easing = FastOutSlowInEasing),
         label = "panel_offset",
     )
     val contentOffset by animateDpAsState(
         targetValue = if (uiState.isPanelOpen) -panelWidthDp else 0.dp,
-        animationSpec = tween(durationMillis = 300),
+        animationSpec = tween(durationMillis = 350, easing = FastOutSlowInEasing),
         label = "content_offset",
     )
 
@@ -76,38 +80,67 @@ fun ChatScreen(
         onPauseOrDispose { /* no-op */ }
     }
 
-    // Total items = messages + optional streaming panel + optional waiting indicator
-    val totalItems = uiState.messages.size +
-            (if (uiState.isStreaming && uiState.streamingSegments.isNotEmpty()) 1 else 0) +
-            (if (uiState.isSending && uiState.streamingSegments.isEmpty()) 1 else 0)
+    // Total items = messages + optional active assistant panel
+    // The active assistant panel handles three states: waiting, streaming, and disappears
+    // when idle — all as a single __active_assistant__ item to avoid add/remove flicker.
+    val isActive = uiState.isSending || uiState.isStreaming
+    val totalItems = uiState.messages.size + (if (isActive) 1 else 0)
 
-    // Auto-scroll to bottom when new items appear (not on every text delta — avoids lag)
-    LaunchedEffect(totalItems) {
-        if (totalItems > 0) {
+    // Track whether we should auto-scroll (user started a conversation turn)
+    var shouldAutoScroll by remember { mutableStateOf(true) }
+
+    // Detect when user scrolls up manually — disable auto-scroll
+    LaunchedEffect(Unit) {
+        snapshotFlow {
+            val layoutInfo = listState.layoutInfo
+            val lastVisible = layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: -1
+            val total = layoutInfo.totalItemsCount
+            lastVisible >= total - 2
+        }.collect { nearBottom ->
+            shouldAutoScroll = nearBottom
+        }
+    }
+
+    // Auto-scroll when content changes and we should be at bottom
+    LaunchedEffect(totalItems, uiState.streamingSegments.size, uiState.streamingSegments.lastOrNull()?.text?.length) {
+        if (totalItems > 0 && shouldAutoScroll) {
             coroutineScope.launch {
                 listState.scrollToItem(totalItems - 1)
             }
         }
     }
 
-    // Outer Box with edge-swipe gesture detection to open panel
+    // Re-enable auto-scroll when a new send starts
+    LaunchedEffect(uiState.isSending, uiState.isStreaming) {
+        if (uiState.isSending || uiState.isStreaming) {
+            shouldAutoScroll = true
+        }
+    }
+
+    // Outer Box with swipe gesture detection to open/close panel
     Box(
         modifier = Modifier
             .fillMaxSize()
             .pointerInput(Unit) {
                 detectHorizontalDragGestures(
-                    onDragStart = { offset ->
-                        val edgeWidthPx = with(density) { 32.dp.toPx() }
-                        isGestureFromEdge = offset.x > size.width - edgeWidthPx
+                    onDragStart = {
+                        cumulativeDragX = 0f
                     },
                     onHorizontalDrag = { change, dragAmount ->
-                        if (isGestureFromEdge && !uiState.isPanelOpen && dragAmount < 0) {
+                        cumulativeDragX += dragAmount
+                        if (!uiState.isPanelOpen && cumulativeDragX < -dragThresholdPx) {
                             change.consume()
                             viewModel.setPanelOpen(true)
+                        } else if (uiState.isPanelOpen && cumulativeDragX > dragThresholdPx) {
+                            change.consume()
+                            viewModel.setPanelOpen(false)
                         }
                     },
                     onDragEnd = {
-                        isGestureFromEdge = false
+                        cumulativeDragX = 0f
+                    },
+                    onDragCancel = {
+                        cumulativeDragX = 0f
                     },
                 )
             }
@@ -170,6 +203,28 @@ fun ChatScreen(
                                         tint = MaterialTheme.colorScheme.error,
                                     )
                                 }
+                            } else {
+                                // Undo button — show when there are user messages to undo
+                                val hasUserMessages = uiState.messages.any { it.role == "user" }
+                                if (hasUserMessages) {
+                                    IconButton(onClick = viewModel::undoLastMessage) {
+                                        Icon(
+                                            Icons.Default.Undo,
+                                            contentDescription = s.undo,
+                                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        )
+                                    }
+                                }
+                                // Redo button — show when there's an active revert
+                                if (uiState.revertMessageId != null) {
+                                    IconButton(onClick = viewModel::redoLastUndo) {
+                                        Icon(
+                                            Icons.Default.Redo,
+                                            contentDescription = s.redo,
+                                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        )
+                                    }
+                                }
                             }
                             IconButton(onClick = { viewModel.initialize(sessionId, directory) }) {
                                 Icon(Icons.Default.Refresh, contentDescription = s.refresh)
@@ -230,6 +285,11 @@ fun ChatScreen(
                             onInputChange = viewModel::onInputChange,
                             onSend = viewModel::sendMessage,
                             isSending = uiState.isSending || uiState.isBlocked,
+                            selectedModel = uiState.selectedModel,
+                            availableModels = uiState.availableModels,
+                            onSelectModel = viewModel::selectModel,
+                            isLoadingModels = uiState.isLoadingModels,
+                            contextUsageK = uiState.contextUsageK,
                         )
                     }
                 },
@@ -287,63 +347,74 @@ fun ChatScreen(
                             }
 
                             else -> {
+                                // Build display list: real messages + optional streaming placeholder.
+                                // The placeholder uses the real message id (from pendingAssistantMessageId)
+                                // so that when getMessages() returns the actual assistant message with
+                                // the same id, LazyColumn sees the same key → no flicker.
+                                val activeId = if (isActive) {
+                                    uiState.pendingAssistantMessageId ?: "__placeholder__"
+                                } else null
+                                val displayMessages = if (activeId != null && uiState.messages.none { it.id == activeId }) {
+                                    uiState.messages + MessageInfo(
+                                        info = MessageInfoData(id = activeId, role = "assistant", agent = uiState.streamingAgent),
+                                    )
+                                } else {
+                                    uiState.messages
+                                }
+                                val streamingId = uiState.pendingAssistantMessageId
+
                                 items(
-                                    items = uiState.messages,
+                                    items = displayMessages,
                                     key = { it.id }
                                 ) { message ->
                                     if (message.role == "user") {
                                         UserMessageItem(message = message)
+                                    } else if (isActive && message.id == streamingId) {
+                                        // Active streaming assistant — show streaming content or waiting spinner
+                                        if (uiState.isStreaming && uiState.streamingSegments.isNotEmpty()) {
+                                            AiResponsePanel(
+                                                agentName = uiState.streamingAgent ?: "AI",
+                                                segments = uiState.streamingSegments,
+                                                isStreaming = true,
+                                            )
+                                        } else {
+                                            // Waiting / thinking spinner
+                                            Surface(
+                                                shape = RoundedCornerShape(8.dp),
+                                                color = MaterialTheme.colorScheme.surface,
+                                                modifier = Modifier.fillMaxWidth(),
+                                            ) {
+                                                Row(
+                                                    modifier = Modifier.padding(12.dp),
+                                                    verticalAlignment = Alignment.CenterVertically,
+                                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                                ) {
+                                                    Text(
+                                                        uiState.streamingAgent ?: "AI",
+                                                        style = MaterialTheme.typography.labelSmall,
+                                                        fontWeight = FontWeight.Bold,
+                                                        color = MaterialTheme.colorScheme.primary,
+                                                    )
+                                                    CircularProgressIndicator(
+                                                        modifier = Modifier.size(14.dp),
+                                                        strokeWidth = 2.dp,
+                                                    )
+                                                    Text(
+                                                        s.thinkingActive,
+                                                        style = MaterialTheme.typography.bodySmall,
+                                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                    )
+                                                }
+                                            }
+                                        }
                                     } else {
+                                        // Completed message — parse and render normally
                                         val segments = remember(message.id) { parseMessageSegments(message) }
                                         AiResponsePanel(
                                             agentName = message.info.agent ?: "AI",
                                             segments = segments,
                                             isStreaming = false,
                                         )
-                                    }
-                                }
-
-                                // Streaming panel — shows text + thinking + tool segments in sequence
-                                if (uiState.isStreaming && uiState.streamingSegments.isNotEmpty()) {
-                                    item(key = "__streaming__") {
-                                        AiResponsePanel(
-                                            agentName = uiState.streamingAgent ?: "AI",
-                                            segments = uiState.streamingSegments,
-                                            isStreaming = true,
-                                        )
-                                    }
-                                }
-
-                                // Waiting indicator — no segments yet, agent is thinking
-                                if (uiState.isSending && uiState.streamingSegments.isEmpty()) {
-                                    item(key = "__waiting__") {
-                                        Surface(
-                                            shape = RoundedCornerShape(8.dp),
-                                            color = MaterialTheme.colorScheme.surface,
-                                            modifier = Modifier.fillMaxWidth(),
-                                        ) {
-                                            Row(
-                                                modifier = Modifier.padding(12.dp),
-                                                verticalAlignment = Alignment.CenterVertically,
-                                                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                            ) {
-                                                Text(
-                                                    uiState.streamingAgent ?: "AI",
-                                                    style = MaterialTheme.typography.labelSmall,
-                                                    fontWeight = FontWeight.Bold,
-                                                    color = MaterialTheme.colorScheme.primary,
-                                                )
-                                                CircularProgressIndicator(
-                                                    modifier = Modifier.size(14.dp),
-                                                    strokeWidth = 2.dp,
-                                                )
-                                                Text(
-                                                    s.thinkingActive,
-                                                    style = MaterialTheme.typography.bodySmall,
-                                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                                )
-                                            }
-                                        }
                                     }
                                 }
                             }
@@ -375,27 +446,17 @@ fun ChatScreen(
                 modifier = Modifier
                     .align(Alignment.CenterEnd)
                     .offset(x = panelOffset)
-                    .pointerInput(Unit) {
-                        detectHorizontalDragGestures(
-                            onHorizontalDrag = { change, dragAmount ->
-                                if (uiState.isPanelOpen && dragAmount > 0) {
-                                    change.consume()
-                                    viewModel.setPanelOpen(false)
-                                }
-                            },
-                        )
-                    }
             ) {
                 RightPanel(
                     files = uiState.panelFiles,
                     currentPath = uiState.currentFilePath,
                     onNavigateToDirectory = viewModel::navigateToDirectory,
                     isLoadingFiles = uiState.isLoadingFiles,
-                    selectedModel = uiState.selectedModel,
-                    availableModels = uiState.availableModels,
-                    onSelectModel = viewModel::selectModel,
-                    isLoadingModels = false,
-                    contextUsageK = uiState.contextUsageK,
+                    onNavigateUp = viewModel::navigateUp,
+                    expandedFilePath = uiState.expandedFilePath,
+                    expandedFileContent = uiState.expandedFileContent,
+                    isLoadingFileContent = uiState.isLoadingFileContent,
+                    onToggleFilePreview = viewModel::toggleFilePreview,
                 )
             }
         }

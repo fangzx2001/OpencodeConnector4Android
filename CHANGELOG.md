@@ -2,27 +2,50 @@
 
 All notable changes to OConnector will be documented in this file.
 
-## [1.2.0] - 2026-05-10
+## [1.2.0] - 2026-05-11
 
 ### Added
 
-- **Side panel** — swipe from right edge (or tap 📁 toolbar button) to open a file browser and model info panel. Navigate project directories, view model/provider details, and track context window usage.
+- **Side panel** — swipe left anywhere on screen to open a file browser and model info panel. Navigate project directories, view model/provider details, and track context window usage.
+- **File preview** — tap any `.md` or `.txt` file in the file browser to preview its content inline without leaving the chat. Uses `GET /file/content?path=` API.
 - **Todo task panel** — overlay panel shows active AI task progress. Badge count in toolbar. Auto-dismisses and sends notification when all tasks complete.
 - **Ask/Confirm bubbles** — when the AI needs permission (tool confirmation) or asks a question, inline bubbles appear between messages and input bar. Permission bubble has Allow Once / Always Allow / Reject. Question bubble has selectable options, custom text input, Submit/Dismiss. Input is blocked while AI waits for response.
+- **Sequential question answering** — when the AI asks multiple questions at once, they are presented one at a time with Back/Next navigation. Progress bar shows current step. All answers collected and submitted together.
+- **Sequential permission confirmation** — multiple permission requests are queued and presented one at a time. After confirming/rejecting one, the next appears automatically.
+- **Multi-select questions** — questions with `multiple: true` allow selecting several options at once.
+- **Undo/Redo** — undo the last user message (soft-hides messages + rolls back file changes on server). Redo restores reverted messages. Toolbar buttons appear when applicable. Undone text is restored to the input box for easy re-editing.
+- **Per-prompt model selection** — choose a different AI model for each message using a nested `{ providerID, modelID }` selector. Sends `ModelRef` in the prompt request so the server uses the exact model you picked.
+- **Context usage display** — shows the current context token consumption (e.g. "32K") alongside the model selector in the input bar, sourced from the latest assistant message's `input` tokens.
+- **Manual update check button** — a refresh button on the connection page lets you manually trigger an update check at any time, in addition to the automatic startup check.
+- **Update check mirror sources** — GitHub + `gh-proxy.com` CDN mirrors checked concurrently with Channel racing. If any source responds, the update is detected — no longer blocked by GitHub connectivity issues.
+- **Version filtering** — update check skips pre-release versions (e.g. `v1_pr1`); only stable `vX.Y.Z` releases are considered.
+- **Help page expansion** — added "Model Selection", "Context Usage", "Undo/Redo", and "Update Check" sections (EN/ZH).
 - **Notification deep link** — tapping a notification now navigates directly to the active chat session.
-- **Test infrastructure** — Robolectric + Compose test rule setup for UI testing.
+- **Child session filtering** — optional toggle to hide sub-sessions from the project list when you only want root conversations.
+- **Comprehensive API documentation** — `OPENCODE_API.md` documents all REST endpoints, SSE events, and data models.
 
 ### Fixed
 
-- **Todo auto-dismiss** — panel auto-closes when all tasks are completed; completion notification sent.
-- **Notification navigation** — session tracking ensures deep links open the correct chat.
-- **Gradle daemon hang** — disabled daemon in `gradle.properties` to prevent shell timeout after builds.
+- **Streaming message flicker/disappear** — AI response would briefly vanish then reappear after completion. Root cause: placeholder item and final message had different LazyColumn keys, causing destroy+recreate. Replaced with a unified placeholder that uses the real message ID, so LazyColumn performs an in-place content update with zero visual discontinuity.
+- **Streaming stalls and blocks** — added watchdog timer to detect and recover from stalled SSE streams. `sendMessage()` now aborts stale state on re-entry, and `initialize()` detects incomplete assistant messages on app restart.
+- **Model selector not persisting** — server expects nested `{ "model": { "providerID": "...", "modelID": "..." } }` format. Fixed `SendMessageRequest` to wrap model selection in `ModelRef` DTO.
+- **Context usage inaccurate** — previous implementation summed all historical tokens (double-counting). Now extracts only the latest assistant message's `input` tokens via reverse scan, and resets properly on session switch.
+- **Session.idle race condition** — `session.idle` was clearing state before messages finished loading. Added delayed state cleanup with retry-based message fetch and assistant message existence verification before committing the idle transition.
+- **Panel swipe conflict** — gesture detection competed with LazyColumn scroll. Replaced with cumulative drag threshold (40dp) that works from anywhere on screen.
+- **Right panel overlaps status bar** — added `WindowInsets.statusBars` padding.
+- **Update check fails in China** — added concurrent mirror sources with Channel racing so at least one source is reachable.
+- **Gradle daemon hang** — disabled daemon in `gradle.properties`.
 
 ### Changed
 
-- Internal refactoring: `ChatUiState` split into `SessionMetaState`, `StreamingDisplayState`, `ChatDisplayState` for cleaner state management.
-- New DTOs: `ToolRef`, `QuestionInfoDto`, `PermissionReplyPayload`, `QuestionReplyPayload` for ask/confirm protocol.
-- 11 new i18n strings (EN + ZH) for permission and question bubble UI.
+- **Chat input bar redesign** — three-section piano-key style bar: model selector segment | context usage indicator | expandable text input + send button. Compact when collapsed, full-featured when expanded.
+- **SSE pipeline optimization** — EventBus buffer 256 (DROP_OLDEST). Delta events 16ms coalescing window. Heartbeat timeout 45s. Incremental `message.updated` processing for all roles.
+- **Dual-channel refresh** — 3s message polling alongside SSE as safety net. Sessions page: SSE + 30s polling. Fallback polling only activates after 15s SSE silence.
+- **Memory optimization** — message list capped at 150 messages. Streaming text truncated at 10K characters.
+- **Smart auto-scroll** — only scrolls to bottom when user is already near the bottom. Scrolling up to read history no longer interrupted.
+- **ExpandableSegment default** — code/text segments default to expanded, preventing "content disappeared" feeling.
+- **Panel animation** — `FastOutSlowInEasing(350ms)` for smoother slide.
+- Internal refactoring: `ChatUiState` split into `SessionMetaState`, `StreamingDisplayState`, `ChatDisplayState`.
 
 ## [1.1.2] - 2026-05-07
 

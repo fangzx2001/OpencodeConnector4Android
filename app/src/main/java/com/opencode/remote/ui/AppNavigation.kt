@@ -15,6 +15,7 @@ import com.opencode.remote.ui.sessions.SessionsViewModel
 import com.opencode.remote.ui.sessions.ProjectSessionsScreen
 import com.opencode.remote.ui.chat.ChatScreen
 import com.opencode.remote.ui.help.HelpScreen
+import com.opencode.remote.ui.update.UpdateViewModel
 
 object Routes {
     const val CONNECTION = "connection"
@@ -103,8 +104,10 @@ fun OConnectorApp(initialIntent: Intent? = null) {
         }
 
         composable(Routes.HELP) {
+            val updateVm: UpdateViewModel = hiltViewModel()
             HelpScreen(
-                onBack = { navController.popBackStack() }
+                onBack = { navController.popBackStack() },
+                updateViewModel = updateVm,
             )
         }
     }

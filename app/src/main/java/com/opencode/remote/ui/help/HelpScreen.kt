@@ -1,24 +1,37 @@
 package com.opencode.remote.ui.help
 
+import android.content.Intent
+import android.net.Uri
+import android.widget.Toast
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
-import androidx.compose.runtime.Composable
+import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.opencode.remote.data.download.DownloadHelper
 import com.opencode.remote.ui.strings.AppLocale
+import com.opencode.remote.ui.update.UpdateDialog
+import com.opencode.remote.ui.update.UpdateUiState
+import com.opencode.remote.ui.update.UpdateViewModel
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun HelpScreen(
     onBack: () -> Unit,
+    updateViewModel: UpdateViewModel,
 ) {
     val scrollState = rememberScrollState()
     val s = AppLocale.strings
+    val context = LocalContext.current
+    val updateState by updateViewModel.uiState.collectAsState()
+    var showUpdateDialog by remember { mutableStateOf(false) }
 
     Scaffold(
         topBar = {
@@ -101,6 +114,68 @@ fun HelpScreen(
             SectionBullet(s.helpUpdateBullet3)
             SectionBullet(s.helpUpdateBullet4)
 
+            Spacer(modifier = Modifier.height(8.dp))
+
+            // Manual "Check for Updates" button
+            OutlinedButton(
+                onClick = { updateViewModel.checkForUpdate() },
+                modifier = Modifier.fillMaxWidth(),
+                enabled = updateState !is UpdateUiState.Checking,
+            ) {
+                if (updateState is UpdateUiState.Checking) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(18.dp),
+                        strokeWidth = 2.dp,
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(s.helpCheckUpdateChecking)
+                } else {
+                    Icon(
+                        imageVector = Icons.Default.Refresh,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp),
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(s.helpCheckUpdateButton)
+                }
+            }
+
+            // Show result feedback inline below button
+            when (updateState) {
+                is UpdateUiState.UpToDate -> {
+                    Text(
+                        text = "✓ ${s.updateUpToDate}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                }
+                is UpdateUiState.Error -> {
+                    Text(
+                        text = s.updateGithubFailed,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                }
+                is UpdateUiState.Available -> {
+                    TextButton(
+                        onClick = { showUpdateDialog = true },
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Download,
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp),
+                            tint = MaterialTheme.colorScheme.primary,
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = "${s.updateAvailable}: v${(updateState as UpdateUiState.Available).version}",
+                            color = MaterialTheme.colorScheme.primary,
+                        )
+                    }
+                }
+                else -> { /* Idle or Checking — no inline feedback */ }
+            }
+
             Spacer(modifier = Modifier.height(24.dp))
             Text(
                 text = s.helpVersion,
@@ -110,6 +185,34 @@ fun HelpScreen(
 
             Spacer(modifier = Modifier.height(32.dp))
         }
+    }
+
+    // Update dialog (shared with ConnectionScreen flow)
+    if (showUpdateDialog && updateState is UpdateUiState.Available) {
+        val avail = updateState as UpdateUiState.Available
+        UpdateDialog(
+            version = avail.version,
+            changelog = avail.changelog,
+            changelogTitle = s.updateChangelog,
+            downloadText = s.updateDownload,
+            closeText = s.updateClose,
+            noChangelogText = "No changelog provided.",
+            onDownload = {
+                showUpdateDialog = false
+                if (avail.downloadUrl != null) {
+                    DownloadHelper.downloadApk(
+                        context,
+                        avail.downloadUrl,
+                        "OConnector-v${avail.version}.apk"
+                    )
+                    Toast.makeText(context, "Download started", Toast.LENGTH_SHORT).show()
+                } else {
+                    val intent = Intent(Intent.ACTION_VIEW, Uri.parse(avail.releaseUrl))
+                    context.startActivity(intent)
+                }
+            },
+            onDismiss = { showUpdateDialog = false }
+        )
     }
 }
 

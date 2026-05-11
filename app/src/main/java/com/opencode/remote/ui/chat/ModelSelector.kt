@@ -1,7 +1,9 @@
 package com.opencode.remote.ui.chat
 
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material3.DropdownMenu
@@ -19,6 +21,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
 import com.opencode.remote.data.api.dto.ModelInfo
 
 @Composable
@@ -44,21 +47,22 @@ fun ModelSelector(
         DropdownMenu(
             expanded = expanded,
             onDismissRequest = { expanded = false },
+            modifier = Modifier.heightIn(max = 200.dp),
         ) {
             availableModels.forEach { model ->
                 val isSelected = selectedModel?.id == model.id &&
                     selectedModel?.name == model.name
                 DropdownMenuItem(
                     text = {
-                        Column {
-                            Text(
-                                text = model.name ?: model.id ?: "Unknown",
-                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
-                                style = MaterialTheme.typography.bodySmall,
-                            )
-                        }
+                        Text(
+                            text = model.name ?: model.id ?: "Unknown",
+                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                            style = MaterialTheme.typography.bodySmall,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
                     },
-                    leadingIcon = {
+                    trailingIcon = {
                         if (isSelected) {
                             Icon(
                                 Icons.Default.Check,
@@ -68,6 +72,8 @@ fun ModelSelector(
                             )
                         }
                     },
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp),
+                    modifier = Modifier.height(36.dp),
                     onClick = {
                         onSelectModel(model)
                         expanded = false

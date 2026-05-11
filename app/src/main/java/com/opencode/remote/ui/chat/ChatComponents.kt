@@ -11,6 +11,8 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.PressInteraction
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -19,6 +21,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
@@ -29,12 +32,17 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Build
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.DataUsage
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Psychology
 import androidx.compose.material.icons.filled.Send
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.FilledIconButton
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -42,6 +50,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -57,6 +66,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.opencode.remote.data.api.dto.MessageInfo
 import com.opencode.remote.data.api.dto.MessagePart
+import com.opencode.remote.data.api.dto.ModelInfo
 import com.opencode.remote.ui.strings.AppLocale
 import kotlinx.coroutines.delay
 
@@ -212,7 +222,9 @@ internal fun ExpandableSegment(
     showDuration: Boolean = false,
 ) {
     val s = AppLocale.strings
-    var expanded by remember { mutableStateOf(false) }
+    // Default expanded for completed thinking/tool segments so content doesn't
+    // "disappear" when transitioning from streaming panel → parsed message.
+    var expanded by remember { mutableStateOf(!isStreaming) }
     var startTime by remember { mutableStateOf<Long?>(null) }
     var durationSec by remember { mutableStateOf<Int?>(null) }
 
@@ -226,10 +238,8 @@ internal fun ExpandableSegment(
                 durationSec = ((System.currentTimeMillis() - startTime!!) / 1000).toInt()
                 startTime = null
             }
-            if (expanded) {
-                delay(800)
-                expanded = false
-            }
+            // Don't auto-collapse on stream end — keep content visible.
+            // The user can manually collapse if they want.
         }
     }
 
@@ -325,43 +335,195 @@ internal fun ChatInputBar(
     onInputChange: (String) -> Unit,
     onSend: () -> Unit,
     isSending: Boolean,
+    selectedModel: ModelInfo?,
+    availableModels: List<ModelInfo>,
+    onSelectModel: (ModelInfo) -> Unit,
+    isLoadingModels: Boolean,
+    contextUsageK: String,
 ) {
     val s = AppLocale.strings
+    var modelDropdownExpanded by remember { mutableStateOf(false) }
+
+    // Track press state for middle piano key (model selector)
+    val middleKeyInteractionSource = remember { MutableInteractionSource() }
+    val middleKeyPressed by middleKeyInteractionSource.interactions.collectAsState(
+        initial = null
+    )
+    val isMiddleKeyPressed = middleKeyPressed is PressInteraction.Press
+
     Surface(
         tonalElevation = 3.dp,
         shadowElevation = 8.dp,
     ) {
-        Row(
+        Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 12.dp)
                 .navigationBarsPadding()
                 .imePadding(),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            OutlinedTextField(
-                value = inputText,
-                onValueChange = onInputChange,
-                placeholder = { Text(s.inputPlaceholder) },
-                modifier = Modifier.weight(1f),
-                maxLines = 4,
-                shape = RoundedCornerShape(24.dp),
-            )
-
-            FilledIconButton(
-                onClick = onSend,
-                enabled = inputText.isNotBlank() && !isSending,
-                modifier = Modifier.size(48.dp),
+            // ── Piano-key strip (top row) ──
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(40.dp)
+                    .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)),
+                verticalAlignment = Alignment.CenterVertically,
             ) {
-                if (isSending) {
-                    CircularProgressIndicator(
-                        modifier = Modifier.size(20.dp),
-                        strokeWidth = 2.dp,
-                        color = MaterialTheme.colorScheme.onPrimary,
-                    )
-                } else {
-                    Icon(Icons.Default.Send, contentDescription = s.connectButton)
+                // Left key — reserved / empty
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxWidth()
+                        .height(40.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    // Reserved for future use
+                }
+
+                // Divider 1
+                HorizontalDivider(
+                    modifier = Modifier
+                        .height(40.dp)
+                        .width(0.5.dp),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.2f),
+                )
+
+                // Middle key — model selector
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxWidth()
+                        .height(40.dp)
+                        .then(
+                            if (!isLoadingModels) {
+                                Modifier.clickable(
+                                    interactionSource = middleKeyInteractionSource,
+                                    indication = null,
+                                ) { modelDropdownExpanded = true }
+                            } else {
+                                Modifier
+                            }
+                        )
+                        .background(
+                            if (isMiddleKeyPressed && !isLoadingModels) {
+                                MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+                            } else {
+                                Color.Transparent
+                            }
+                        ),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            text = selectedModel?.name ?: "Model",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                    DropdownMenu(
+                        expanded = modelDropdownExpanded,
+                        onDismissRequest = { modelDropdownExpanded = false },
+                        modifier = Modifier.heightIn(max = 200.dp),
+                    ) {
+                        availableModels.forEach { model ->
+                            val isSelected = selectedModel?.id == model.id &&
+                                selectedModel?.name == model.name
+                            DropdownMenuItem(
+                                text = {
+                                    Text(
+                                        text = model.name ?: model.id ?: "Unknown",
+                                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
+                                },
+                                trailingIcon = {
+                                    if (isSelected) {
+                                        Icon(
+                                            Icons.Default.Check,
+                                            contentDescription = null,
+                                            tint = MaterialTheme.colorScheme.primary,
+                                        )
+                                    }
+                                },
+                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp),
+                                modifier = Modifier.height(36.dp),
+                                onClick = {
+                                    onSelectModel(model)
+                                    modelDropdownExpanded = false
+                                },
+                            )
+                        }
+                    }
+                }
+
+                // Divider 2
+                HorizontalDivider(
+                    modifier = Modifier
+                        .height(40.dp)
+                        .width(0.5.dp),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.2f),
+                )
+
+                // Right key — context usage (display only)
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxWidth()
+                        .height(40.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            imageVector = Icons.Default.DataUsage,
+                            contentDescription = null,
+                            modifier = Modifier.size(14.dp),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        Spacer(Modifier.width(4.dp))
+                        Text(
+                            text = contextUsageK,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+            }
+
+            // ── Text input row (bottom) — no separator between strip and input ──
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                OutlinedTextField(
+                    value = inputText,
+                    onValueChange = onInputChange,
+                    placeholder = { Text(s.inputPlaceholder) },
+                    modifier = Modifier.weight(1f),
+                    maxLines = 4,
+                    shape = RoundedCornerShape(24.dp),
+                )
+
+                FilledIconButton(
+                    onClick = onSend,
+                    enabled = inputText.isNotBlank() && !isSending,
+                    modifier = Modifier.size(48.dp),
+                ) {
+                    if (isSending) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(20.dp),
+                            strokeWidth = 2.dp,
+                            color = MaterialTheme.colorScheme.onPrimary,
+                        )
+                    } else {
+                        Icon(Icons.Default.Send, contentDescription = s.connectButton)
+                    }
                 }
             }
         }

@@ -59,6 +59,8 @@ data class AppStrings(
     val sessionFallback: String,
     val stop: String,
     val refresh: String,
+    val undo: String,
+    val redo: String,
     val todoTitle: String,
     val noTodos: String,
     val toolCalls: String,
@@ -130,6 +132,8 @@ data class AppStrings(
     val helpUpdateBullet2: String,
     val helpUpdateBullet3: String,
     val helpUpdateBullet4: String,
+    val helpCheckUpdateButton: String,
+    val helpCheckUpdateChecking: String,
 
     // Error messages
     val errEnterIp: String,
@@ -145,6 +149,8 @@ data class AppStrings(
     val errUnknown: String,
     val errSendFailed: String,
     val errAbortFailed: String,
+    val errUndoFailed: String,
+    val errRedoFailed: String,
 
     // Update dialog
     val updateAvailable: String,
@@ -230,6 +236,8 @@ val enStrings = AppStrings(
     sessionFallback = "Session",
     stop = "Stop",
     refresh = "Refresh",
+    undo = "Undo",
+    redo = "Redo",
     todoTitle = "Todo List",
     noTodos = "No tasks yet",
     toolCalls = "tool calls",
@@ -300,6 +308,8 @@ val enStrings = AppStrings(
     helpUpdateBullet2 = "Tap the icon to view the changelog and download the update",
     helpUpdateBullet3 = "The APK will be downloaded to your Downloads folder and installed automatically",
     helpUpdateBullet4 = "If GitHub is unreachable, the update check is silently skipped",
+    helpCheckUpdateButton = "Check for Updates Now",
+    helpCheckUpdateChecking = "Checking...",
 
     // Error messages
     errEnterIp = "Please enter server IP address",
@@ -315,6 +325,8 @@ val enStrings = AppStrings(
     errUnknown = "Unknown error",
     errSendFailed = "Send failed: %s",
     errAbortFailed = "Abort failed: %s",
+    errUndoFailed = "Undo failed: %s",
+    errRedoFailed = "Redo failed: %s",
 
     updateAvailable = "Update Available",
     updateDownload = "Download",
@@ -395,6 +407,8 @@ val zhStrings = AppStrings(
     sessionFallback = "会话",
     stop = "停止生成",
     refresh = "刷新",
+    undo = "撤销",
+    redo = "重做",
     todoTitle = "Todo 列表",
     noTodos = "暂无待办事项",
     toolCalls = "个工具调用",
@@ -465,6 +479,8 @@ val zhStrings = AppStrings(
     helpUpdateBullet2 = "点击图标可查看更新日志并下载更新",
     helpUpdateBullet3 = "APK 会下载到手机的 Downloads 文件夹并自动弹出安装",
     helpUpdateBullet4 = "如果无法连接 GitHub，更新检查会被静默跳过",
+    helpCheckUpdateButton = "立即检查更新",
+    helpCheckUpdateChecking = "检查中...",
 
     // Error messages
     errEnterIp = "请输入服务器 IP 地址",
@@ -480,6 +496,8 @@ val zhStrings = AppStrings(
     errUnknown = "未知错误",
     errSendFailed = "发送失败: %s",
     errAbortFailed = "中断失败: %s",
+    errUndoFailed = "撤销失败: %s",
+    errRedoFailed = "重做失败: %s",
 
     updateAvailable = "发现新版本",
     updateDownload = "下载",

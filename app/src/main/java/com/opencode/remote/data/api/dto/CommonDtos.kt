@@ -63,20 +63,37 @@ data class FileNode(
     val ignored: Boolean = false,
 )
 
+/**
+ * API response: GET /file/content?path=...
+ * type: "text" | "binary"
+ * content: file body (text or base64-encoded binary)
+ */
+@Serializable
+data class FileContent(
+    val type: String = "text",
+    val content: String = "",
+    val encoding: String? = null,
+    val mimeType: String? = null,
+)
+
 @Serializable
 data class ProviderList(
     val providers: List<ProviderInfo> = emptyList(),
+    val default: Map<String, String> = emptyMap(),
 )
 
 @Serializable
 data class ProviderInfo(
     val id: String,
     val name: String? = null,
-    val models: List<ModelInfo> = emptyList(),
+    /** Server returns models as a JSON object (Map keyed by model ID), not an array. */
+    val models: Map<String, ModelInfo> = emptyMap(),
 )
 
 @Serializable
 data class ModelInfo(
     val id: String? = null,
     val name: String? = null,
+    val providerID: String? = null,
+    val status: String? = null,
 )

@@ -62,6 +62,13 @@ data class EventProperties(
     val always: List<String>? = null,                    // always-allow patterns
     val tool: ToolRef? = null,                           // tool reference {messageID, callID}
     val questions: List<QuestionInfoDto>? = null,        // question definitions
+    val status: StatusData? = null,                      // session.status event data
+)
+
+/** Session status data carried by session.status SSE events. */
+@Serializable
+data class StatusData(
+    val type: String? = null,  // "busy" or "idle"
 )
 
 /** Tool reference for blocking permission/question events. */
