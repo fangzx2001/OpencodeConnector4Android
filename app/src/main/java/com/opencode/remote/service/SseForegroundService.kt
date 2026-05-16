@@ -68,8 +68,8 @@ class SseForegroundService : Service() {
         )
 
         return Notification.Builder(this, OConnectorApp.CHANNEL_ID)
-            .setContentTitle("OConnector")
-            .setContentText("OConnector is running")
+            .setContentTitle("OConnector X")
+            .setContentText("OConnector X is running")
             .setSmallIcon(com.opencode.remote.R.mipmap.ic_launcher)
             .setContentIntent(pendingIntent)
             .setOngoing(true)
