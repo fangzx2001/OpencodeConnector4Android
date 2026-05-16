@@ -8,7 +8,7 @@ import android.os.Environment
 object DownloadHelper {
     fun downloadApk(context: Context, url: String, filename: String): Long {
         val request = DownloadManager.Request(Uri.parse(url)).apply {
-            setTitle("OConnector Update")
+            setTitle("OConnector X Update")
             setDescription("Downloading $filename")
             setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, filename)
             setAllowedNetworkTypes(DownloadManager.Request.NETWORK_WIFI or DownloadManager.Request.NETWORK_MOBILE)
