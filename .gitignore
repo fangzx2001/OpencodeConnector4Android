@@ -50,3 +50,6 @@ release/
 # Keystore / signing
 *.jks
 *.keystore
+
+# Node.js
+node_modules/

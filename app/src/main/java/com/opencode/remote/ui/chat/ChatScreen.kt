@@ -37,6 +37,7 @@ import com.opencode.remote.data.api.dto.MessageInfoData
 import com.opencode.remote.ui.components.ErrorSnackbar
 import com.opencode.remote.ui.strings.AppLocale
 import androidx.lifecycle.compose.LifecycleResumeEffect
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -49,7 +50,6 @@ fun ChatScreen(
 ) {
     val uiState by viewModel.uiState.collectAsState()
     val listState = rememberLazyListState()
-    val coroutineScope = rememberCoroutineScope()
     val s = AppLocale.strings
     val density = LocalDensity.current
 
@@ -70,50 +70,112 @@ fun ChatScreen(
         label = "content_offset",
     )
 
+    // ── Scroll System ─────────────────────────────────────────────────────
+    // Design: open-at-bottom, auto-follow during streaming, unlock on user
+    // scroll-up, re-lock when user scrolls back to bottom.
+    //
+    // KEY INSIGHT: We do NOT use isLoading as a scroll trigger. isLoading
+    // changes during the Composition phase, but LazyColumn's totalItemsCount
+    // only updates during the Layout phase (after composition). Using
+    // !isLoading as a condition causes a race: snapshotFlow re-evaluates
+    // when isLoading changes (before layout), sees stale totalItemsCount=1
+    // (from the __loading__ placeholder), and scrolls to the wrong position.
+    // Fix: wait for totalItemsCount to match the expected data count, which
+    // can only happen after layout completes.
+    var shouldAutoScroll by remember { mutableStateOf(true) }
+    var initialScrollDone by remember(sessionId) { mutableStateOf(false) }
+    var resumeKey by remember { mutableIntStateOf(0) }
+    val coroutineScope = rememberCoroutineScope()
+
+    // Session initialization
     LaunchedEffect(sessionId) {
+        shouldAutoScroll = true
+        initialScrollDone = false
         viewModel.initialize(sessionId, directory)
     }
 
-    // Auto-refresh when navigating back to this screen
+    // Resume: re-init + trigger re-scroll
     LifecycleResumeEffect(sessionId) {
         viewModel.initialize(sessionId, directory)
+        shouldAutoScroll = true
+        initialScrollDone = false
+        resumeKey++
         onPauseOrDispose { /* no-op */ }
     }
 
     // Total items = messages + optional active assistant panel
-    // The active assistant panel handles three states: waiting, streaming, and disappears
-    // when idle — all as a single __active_assistant__ item to avoid add/remove flicker.
     val isActive = uiState.isSending || uiState.isStreaming
     val totalItems = uiState.messages.size + (if (isActive) 1 else 0)
 
-    // Track whether we should auto-scroll (user started a conversation turn)
-    var shouldAutoScroll by remember { mutableStateOf(true) }
+    // 1. Initial scroll: wait for LazyColumn layout to reflect actual data.
+    //    Re-fires on resume (via resumeKey) to re-scroll after re-init.
+    //
+    //    RACE FIX: We compare layout-derived totalItemsCount against data-derived
+    //    expected count. Even if isLoading triggers a snapshotFlow re-evaluation
+    //    before layout updates, the stale totalItemsCount won't match the expected
+    //    data count, so the condition can't pass prematurely.
+    LaunchedEffect(sessionId, resumeKey) {
+        snapshotFlow {
+            val layoutCount = listState.layoutInfo.totalItemsCount
+            val dataCount = uiState.messages.size + (if (uiState.isSending || uiState.isStreaming) 1 else 0)
+            layoutCount to dataCount
+        }.first { (layout, data) -> data > 0 && layout >= data }
+        listState.scrollToItem(listState.layoutInfo.totalItemsCount - 1)
+        initialScrollDone = true
+    }
 
-    // Detect when user scrolls up manually — disable auto-scroll
+    // 2. User scroll tracking: detect near-bottom vs away-from-bottom.
+    //    Only active after initial scroll completes — prevents the race where
+    //    LazyColumn starts at top (before initial scroll) and incorrectly
+    //    sets shouldAutoScroll = false.
     LaunchedEffect(Unit) {
         snapshotFlow {
             val layoutInfo = listState.layoutInfo
+            if (layoutInfo.totalItemsCount == 0) return@snapshotFlow null
             val lastVisible = layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: -1
             val total = layoutInfo.totalItemsCount
             lastVisible >= total - 2
-        }.collect { nearBottom ->
-            shouldAutoScroll = nearBottom
+        }.collect { atBottom ->
+            if (atBottom == null || !initialScrollDone) return@collect
+            shouldAutoScroll = atBottom
         }
     }
 
-    // Auto-scroll when content changes and we should be at bottom
+    // 3. Auto-scroll on content changes (new messages, streaming text updates)
+    //    Uses scrollToItem + forward scroll to ensure the BOTTOM of the last item
+    //    is visible, not just the top. Without the forward scroll, tall streaming
+    //    items (agent name + thinking bubble + text) can anchor the viewport at the
+    //    agent name, making content below invisible and blocking user scroll.
     LaunchedEffect(totalItems, uiState.streamingSegments.size, uiState.streamingSegments.lastOrNull()?.text?.length) {
-        if (totalItems > 0 && shouldAutoScroll) {
-            coroutineScope.launch {
-                listState.scrollToItem(totalItems - 1)
+        if (!initialScrollDone || totalItems <= 0) return@LaunchedEffect
+        if (shouldAutoScroll) {
+            listState.scrollToItem(totalItems - 1)
+            // If the last item is taller than the viewport, scrollToItem only shows
+            // its top (agent name). Scroll forward to the absolute bottom so the
+            // latest streaming content is visible.
+            if (listState.canScrollForward) {
+                listState.scroll { scrollBy(100_000f) }
             }
         }
     }
 
-    // Re-enable auto-scroll when a new send starts
-    LaunchedEffect(uiState.isSending, uiState.isStreaming) {
-        if (uiState.isSending || uiState.isStreaming) {
+    // 4. Re-enable auto-follow when user sends a new message
+    LaunchedEffect(uiState.isSending) {
+        if (uiState.isSending) {
             shouldAutoScroll = true
+        }
+    }
+
+    // 5. Scroll to bottom when keyboard opens (viewport shrinks).
+    //    Without this, the keyboard pushes the input bar up but the chat content
+    //    stays in place, hiding the bottom messages behind the keyboard area.
+    LaunchedEffect(listState.layoutInfo.viewportSize) {
+        if (!initialScrollDone || totalItems <= 0) return@LaunchedEffect
+        if (shouldAutoScroll) {
+            listState.scrollToItem(totalItems - 1)
+            if (listState.canScrollForward) {
+                listState.scroll { scrollBy(100_000f) }
+            }
         }
     }
 
@@ -254,6 +316,15 @@ fun ChatScreen(
                             )
                         }
 
+                        // Recovery bubble — heuristic detected interrupted blocking state
+                        if (uiState.isBlocked && uiState.pendingPermission == null && uiState.pendingQuestion == null && uiState.recoveryPending) {
+                            RecoveryBubble(
+                                onCheckStatus = { viewModel.recheckBlockingState() },
+                                onDismiss = { viewModel.dismissBlocking() },
+                                modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+                            )
+                        }
+
                         // AI waiting indicator when blocked
                         if (uiState.isBlocked) {
                             Surface(
@@ -284,12 +355,24 @@ fun ChatScreen(
                             inputText = uiState.inputText,
                             onInputChange = viewModel::onInputChange,
                             onSend = viewModel::sendMessage,
-                            isSending = uiState.isSending || uiState.isBlocked,
+                            isSending = uiState.isSending || (uiState.isBlocked && !uiState.recoveryPending),
                             selectedModel = uiState.selectedModel,
                             availableModels = uiState.availableModels,
                             onSelectModel = viewModel::selectModel,
                             isLoadingModels = uiState.isLoadingModels,
                             contextUsageK = uiState.contextUsageK,
+                            onScrollToBottom = {
+                                shouldAutoScroll = true
+                                coroutineScope.launch {
+                                    val total = listState.layoutInfo.totalItemsCount
+                                    if (total > 0) {
+                                        listState.scrollToItem(total - 1)
+                                        if (listState.canScrollForward) {
+                                            listState.scroll { scrollBy(100_000f) }
+                                        }
+                                    }
+                                }
+                            },
                         )
                     }
                 },
@@ -458,6 +541,72 @@ fun ChatScreen(
                     isLoadingFileContent = uiState.isLoadingFileContent,
                     onToggleFilePreview = viewModel::toggleFilePreview,
                 )
+            }
+        }
+    }
+}
+
+@Composable
+internal fun RecoveryBubble(
+    onCheckStatus: () -> Unit,
+    onDismiss: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val s = AppLocale.strings
+    Card(
+        modifier = modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(12.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.5f),
+        ),
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            // Header with info icon
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Icon(
+                    Icons.Default.Info,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.tertiary,
+                    modifier = Modifier.size(20.dp),
+                )
+                Text(
+                    s.recoveryBubbleTitle,
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onTertiaryContainer,
+                )
+            }
+
+            Spacer(Modifier.height(8.dp))
+
+            Text(
+                s.recoveryBubbleMessage,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onTertiaryContainer,
+            )
+
+            Spacer(Modifier.height(12.dp))
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Button(
+                    onClick = onCheckStatus,
+                    modifier = Modifier.weight(1f),
+                ) {
+                    Text(s.recoveryCheckStatus)
+                }
+                OutlinedButton(
+                    onClick = onDismiss,
+                    modifier = Modifier.weight(1f),
+                ) {
+                    Text(s.recoveryDismiss)
+                }
             }
         }
     }

@@ -10,11 +10,13 @@ An Android client for the [OpenCode](https://opencode.ai) AI coding assistant. C
 
 ## Features
 
+- **Multi-server management** — add and switch between multiple OpenCode servers from the home screen
 - **Multi-project discovery** — automatically finds and lists sessions from all projects, regardless of which directory the server was started from
 - **Optional child-session filtering** — hide sub-sessions from project lists when you only want root conversations
 - **HTTPS (TLS) support** — connect through HTTPS reverse proxies (Lucky, Nginx, Caddy, etc.) with optional self-signed certificate trust
-- **In-app update check** — automatically checks GitHub for new versions on startup, one-tap APK download & install
-- **Background SSE stability** — foreground service keeps the connection alive when the app is in the background
+- **In-app update check** — automatically checks GitHub for new versions on startup, one-tap APK download & install (proxied for China)
+- **Background SSE stability** — foreground service keeps the connection alive when the app is in background
+- **State persistence across app kill** — question/permission bubbles and streaming output survive process death via disk cache; re-enter any session and pick up exactly where you left off
 - Real-time AI chat with SSE streaming
 - Tool call rendering (thinking bubbles, tool summaries)
 - Todo task panel overlay
@@ -87,11 +89,12 @@ You can start the server from any directory — OConnector will discover all pro
 
 ### Usage
 
-1. Open OConnector → enter PC IP and port → tap **Connect**
-2. The session list shows all projects and sessions across your PC
-3. Tap a project to see its sessions, tap a session to enter chat
-4. Tap the eye icon in the top bar to hide or show child sessions
-5. Send messages, switch agents, track todos
+1. Open OConnector → tap **+** on the Server List screen to add your first server
+2. Enter PC IP, port, and credentials → tap **Connect**
+3. The session list shows all projects and sessions across your PC
+4. Tap a project to see its sessions, tap a session to enter chat
+5. Tap the eye icon in the top bar to hide or show child sessions
+6. Send messages, switch agents, track todos
 
 ### Connecting via HTTPS Reverse Proxy
 
@@ -128,7 +131,8 @@ app/src/main/java/com/opencode/remote/
 │   └── sse/          # SSE event bus
 ├── service/          # Foreground service
 ├── ui/
-│   ├── connection/   # Connect screen
+│   ├── connection/   # Connect / Add Server screen
+│   ├── serverlist/   # Server list (home screen)
 │   ├── sessions/     # Project + session list
 │   ├── chat/         # Chat + streaming + tools
 │   ├── help/         # Help screen

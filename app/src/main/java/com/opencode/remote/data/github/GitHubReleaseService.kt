@@ -10,14 +10,29 @@ import io.ktor.http.*
 import kotlinx.coroutines.async
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.coroutineScope
-import kotlinx.coroutines.selects.select
+import okhttp3.OkHttpClient
+import java.net.ProxySelector
+import java.util.concurrent.TimeUnit
 import javax.inject.Inject
 
 class GitHubReleaseService @Inject constructor() {
     private val client = HttpClient(OkHttp) {
         install(HttpTimeout) {
-            connectTimeoutMillis = 8_000
-            requestTimeoutMillis = 12_000
+            connectTimeoutMillis = 15_000
+            requestTimeoutMillis = 30_000
+        }
+        engine {
+            // Explicitly use the system ProxySelector so that VPN/proxy apps
+            // (Clash, V2Ray, etc.) are respected. Without this, OkHttp may
+            // bypass the system proxy on some Android configurations.
+            config {
+                proxySelector(ProxySelector.getDefault())
+                followRedirects(true)
+                followSslRedirects(true)
+                retryOnConnectionFailure(true)
+                connectTimeout(15, TimeUnit.SECONDS)
+                readTimeout(30, TimeUnit.SECONDS)
+            }
         }
     }
 
@@ -29,10 +44,25 @@ class GitHubReleaseService @Inject constructor() {
         // These proxies mirror the GitHub API so no separate repo is needed.
         // Each entry: (display name, API base URL)
         private val SOURCES = listOf(
-            "GitHub"       to "https://api.github.com",
-            // gh-proxy.com — GitHub API reverse proxy, fast in China
             "gh-proxy.com" to "https://gh-proxy.com/https://api.github.com",
+            "GitHub"       to "https://api.github.com",
         )
+
+        // Proxies for GitHub file downloads (APK etc.).
+        // Used when the browser_download_url points to github.com which is blocked in China.
+        private val DOWNLOAD_PROXIES = listOf(
+            "https://gh-proxy.com",
+        )
+
+        /**
+         * Rewrite a github.com download URL through a proxy so it's accessible in China.
+         * Returns the original URL if it doesn't point to github.com.
+         */
+        fun proxiedDownloadUrl(originalUrl: String): String {
+            if (!originalUrl.contains("github.com")) return originalUrl
+            // Use the first proxy — if it fails the user can retry
+            return "${DOWNLOAD_PROXIES.first()}/$originalUrl"
+        }
     }
 
     /**
@@ -81,8 +111,9 @@ class GitHubReleaseService @Inject constructor() {
             channel.close()
 
             finalResult ?: run {
-                val detail = failures.joinToString("; ") { (src, msg) -> "$src: $msg" }
-                Result.failure(Exception("All update sources failed — $detail"))
+                val triedSources = failures.map { it.first }
+                Log.e(TAG, "All update sources failed. Tried: $triedSources")
+                Result.failure(Exception("Tried ${triedSources.joinToString(", ")} — all failed. Check network."))
             }
         }
     }

@@ -24,6 +24,8 @@ data class AppStrings(
     val usernamePlaceholder: String,
     val passwordLabel: String,
     val passwordPlaceholder: String,
+    val passwordShow: String,
+    val passwordHide: String,
     val useTlsLabel: String,
     val insecureTrustLabel: String,
     val connectButton: String,
@@ -135,6 +137,16 @@ data class AppStrings(
     val helpCheckUpdateButton: String,
     val helpCheckUpdateChecking: String,
 
+    // Help - Server management
+    val helpServerMgmtBody: String,
+    val helpServerMgmtBullet1: String,
+    val helpServerMgmtBullet2: String,
+    val helpServerMgmtBullet3: String,
+    val helpServerMgmtBullet4: String,
+    val helpServerMgmtBullet5: String,
+    val helpFaq6Q: String,
+    val helpFaq6A: String,
+
     // Error messages
     val errEnterIp: String,
     val errInvalidPort: String,
@@ -185,6 +197,40 @@ data class AppStrings(
     val questionNext: String,
     val questionStep: String,
     val aiWaiting: String,
+
+    // Blocking state recovery
+    val blockingStateExpired: String,
+    val recoveryBubbleTitle: String,
+    val recoveryBubbleMessage: String,
+    val recoveryCheckStatus: String,
+    val recoveryDismiss: String,
+
+    // Server management
+    val servers: String,
+    val addServer: String,
+    val noServers: String,
+    val addFirstServer: String,
+    val serverName: String,
+    val serverNamePlaceholder: String,
+    val serverHost: String,
+    val saveAndConnect: String,
+    val deleteServer: String,
+    val deleteServerConfirm: String,
+    val serverConnected: String,
+    val switchServer: String,
+    val addServerTitle: String,
+    val editServerTitle: String,
+    val serverList: String,
+
+    // Memo panel
+    val memoPanel: String,
+    val newMemo: String,
+    val memoTitleHint: String,
+    val memoContentHint: String,
+    val deleteMemo: String,
+    val deleteMemoConfirm: String,
+    val noMemos: String,
+    val noMemosHint: String,
 )
 
 // ─── English ───────────────────────────────────────────────────────
@@ -201,6 +247,8 @@ val enStrings = AppStrings(
     usernamePlaceholder = "Optional (default: opencode)",
     passwordLabel = "Password",
     passwordPlaceholder = "Optional",
+    passwordShow = "Show password",
+    passwordHide = "Hide password",
     useTlsLabel = "Use HTTPS (TLS)",
     insecureTrustLabel = "Allow untrusted certificates",
     connectButton = "Connect",
@@ -257,10 +305,10 @@ val enStrings = AppStrings(
     helpStep1Code = "opencode serve --hostname=0.0.0.0 --port=4096",
     helpStep1After = "Do not close the terminal after starting. You should see \"Server listening\" to confirm it's running.",
     helpStep2 = "Step 2: Connect from Phone",
-    helpStep2Bullet1 = "1. Open the app and go to the connection page",
-    helpStep2Bullet2 = "2. Enter your PC's local IP address",
-    helpStep2Bullet3 = "3. Keep port as default 4096; fill Username/Password only if server requires auth",
-    helpStep2Bullet4 = "4. Tap \"Connect\"",
+    helpStep2Bullet1 = "1. Open OConnector — you'll see the server list",
+    helpStep2Bullet2 = "2. First time? Tap + to add your server",
+    helpStep2Bullet3 = "3. Enter host, port, and credentials",
+    helpStep2Bullet4 = "4. Tap \"Save & Connect\"",
     helpStep2HowToIp = "How to find your PC's IP address:",
     helpStep2Win = "Windows: Open CMD, run ipconfig, look for \"IPv4 Address\"",
     helpStep2Mac = "macOS / Linux: Run ifconfig or hostname -I in terminal",
@@ -311,6 +359,16 @@ val enStrings = AppStrings(
     helpCheckUpdateButton = "Check for Updates Now",
     helpCheckUpdateChecking = "Checking...",
 
+    // Help - Server management
+    helpServerMgmtBody = "OConnector supports connecting to multiple OpenCode servers. Manage your servers from the server list screen.",
+    helpServerMgmtBullet1 = "Tap + or the Add button to add a new server",
+    helpServerMgmtBullet2 = "Enter a name (optional), host, port, and credentials",
+    helpServerMgmtBullet3 = "Tap a server card to connect automatically",
+    helpServerMgmtBullet4 = "Long-press a server card to delete it",
+    helpServerMgmtBullet5 = "Switch between servers by disconnecting and selecting another",
+    helpFaq6Q = "How do I add or switch servers?",
+    helpFaq6A = "Tap the + button on the server list screen to add a new server. To switch servers, disconnect from the current one (⏻ button) and tap a different server.",
+
     // Error messages
     errEnterIp = "Please enter server IP address",
     errInvalidPort = "Please enter a valid port (1-65535)",
@@ -356,6 +414,40 @@ val enStrings = AppStrings(
     questionNext = "Next",
     questionStep = "Step",
     aiWaiting = "AI waiting for your response...",
+
+    // Blocking state recovery
+    blockingStateExpired = "AI request may have expired. Tap refresh if needed.",
+    recoveryBubbleTitle = "Session Interrupted",
+    recoveryBubbleMessage = "The AI was waiting for your response. Send a message to resume, or check status.",
+    recoveryCheckStatus = "Check Status",
+    recoveryDismiss = "Dismiss",
+
+    // Server management
+    servers = "Servers",
+    addServer = "Add Server",
+    noServers = "No servers yet",
+    addFirstServer = "Tap + to add your first OpenCode server",
+    serverName = "Server Name",
+    serverNamePlaceholder = "e.g. Home PC, Office Server",
+    serverHost = "Host",
+    saveAndConnect = "Save & Connect",
+    deleteServer = "Delete Server",
+    deleteServerConfirm = "Delete this server? Saved credentials will be removed.",
+    serverConnected = "Connected",
+    switchServer = "Switch Server",
+    addServerTitle = "Add Server",
+    editServerTitle = "Edit Server",
+    serverList = "Server List",
+
+    // Memo panel
+    memoPanel = "Memos",
+    newMemo = "New Memo",
+    memoTitleHint = "Title",
+    memoContentHint = "Content...",
+    deleteMemo = "Delete memo",
+    deleteMemoConfirm = "Delete this memo?",
+    noMemos = "No memos yet",
+    noMemosHint = "Tap + to create one",
 )
 
 // ─── Chinese ───────────────────────────────────────────────────────
@@ -372,6 +464,8 @@ val zhStrings = AppStrings(
     usernamePlaceholder = "可选（默认: opencode）",
     passwordLabel = "密码",
     passwordPlaceholder = "可选",
+    passwordShow = "显示密码",
+    passwordHide = "隐藏密码",
     useTlsLabel = "使用 HTTPS (TLS)",
     insecureTrustLabel = "允许不受信任的证书",
     connectButton = "连接服务器",
@@ -428,10 +522,10 @@ val zhStrings = AppStrings(
     helpStep1Code = "opencode serve --hostname=0.0.0.0 --port=4096",
     helpStep1After = "启动后不要关闭终端窗口。看到 \"Server listening\" 提示表示启动成功。",
     helpStep2 = "第二步：手机连接服务器",
-    helpStep2Bullet1 = "1. 打开 app，进入连接页",
-    helpStep2Bullet2 = "2. 输入 PC 的局域网 IP 地址",
-    helpStep2Bullet3 = "3. 端口保持默认 4096；用户名和密码仅在服务器开启认证时填写",
-    helpStep2Bullet4 = "4. 点击「连接」",
+    helpStep2Bullet1 = "1. 打开 OConnector，进入服务器列表",
+    helpStep2Bullet2 = "2. 首次使用请点击 + 添加服务器",
+    helpStep2Bullet3 = "3. 填写主机地址、端口和凭据",
+    helpStep2Bullet4 = "4. 点击「保存并连接」",
     helpStep2HowToIp = "如何查看 PC 的 IP 地址：",
     helpStep2Win = "Windows：打开 CMD，运行 ipconfig，找到「IPv4 地址」",
     helpStep2Mac = "macOS / Linux：终端运行 ifconfig 或 hostname -I",
@@ -482,6 +576,16 @@ val zhStrings = AppStrings(
     helpCheckUpdateButton = "立即检查更新",
     helpCheckUpdateChecking = "检查中...",
 
+    // Help - Server management
+    helpServerMgmtBody = "OConnector 支持连接多台 OpenCode 服务器。在服务器列表页面管理你的服务器。",
+    helpServerMgmtBullet1 = "点击 + 或「添加」按钮添加新服务器",
+    helpServerMgmtBullet2 = "填写名称（可选）、主机地址、端口和凭据",
+    helpServerMgmtBullet3 = "点击服务器卡片自动连接",
+    helpServerMgmtBullet4 = "长按服务器卡片可删除",
+    helpServerMgmtBullet5 = "切换服务器：先断开当前连接，再选择另一台服务器",
+    helpFaq6Q = "如何添加或切换服务器？",
+    helpFaq6A = "在服务器列表页面点击 + 按钮添加新服务器。切换服务器时，先断开当前连接（⏻ 按钮），再点击另一台服务器。",
+
     // Error messages
     errEnterIp = "请输入服务器 IP 地址",
     errInvalidPort = "请输入有效端口号 (1-65535)",
@@ -527,4 +631,38 @@ val zhStrings = AppStrings(
     questionNext = "下一步",
     questionStep = "步骤",
     aiWaiting = "AI 等待你的回复...",
+
+    // Blocking state recovery
+    blockingStateExpired = "AI 请求可能已过期。如需要请点击刷新。",
+    recoveryBubbleTitle = "会话已中断",
+    recoveryBubbleMessage = "AI 正在等待您的回复。请发送消息继续对话，或检查状态。",
+    recoveryCheckStatus = "检查状态",
+    recoveryDismiss = "忽略",
+
+    // Server management
+    servers = "服务器",
+    addServer = "添加服务器",
+    noServers = "暂无服务器",
+    addFirstServer = "点击 + 添加第一台 OpenCode 服务器",
+    serverName = "服务器名称",
+    serverNamePlaceholder = "例如：家里电脑、公司服务器",
+    serverHost = "主机地址",
+    saveAndConnect = "保存并连接",
+    deleteServer = "删除服务器",
+    deleteServerConfirm = "确定删除此服务器？保存的凭据将被清除。",
+    serverConnected = "已连接",
+    switchServer = "切换服务器",
+    addServerTitle = "添加服务器",
+    editServerTitle = "编辑服务器",
+    serverList = "服务器列表",
+
+    // Memo panel
+    memoPanel = "备忘录",
+    newMemo = "新建备忘录",
+    memoTitleHint = "标题",
+    memoContentHint = "内容...",
+    deleteMemo = "删除备忘录",
+    deleteMemoConfirm = "确定删除此备忘录？",
+    noMemos = "暂无备忘录",
+    noMemosHint = "点击 + 创建",
 )

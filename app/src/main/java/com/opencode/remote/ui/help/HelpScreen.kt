@@ -16,6 +16,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.opencode.remote.data.download.DownloadHelper
+import com.opencode.remote.data.github.GitHubReleaseService
 import com.opencode.remote.ui.strings.AppLocale
 import com.opencode.remote.ui.update.UpdateDialog
 import com.opencode.remote.ui.update.UpdateUiState
@@ -55,6 +56,14 @@ fun HelpScreen(
         ) {
             SectionTitle(s.helpWhatIs)
             SectionBody(s.helpWhatIsBody)
+
+            SectionTitle(s.servers)
+            SectionBody(s.helpServerMgmtBody)
+            SectionBullet(s.helpServerMgmtBullet1)
+            SectionBullet(s.helpServerMgmtBullet2)
+            SectionBullet(s.helpServerMgmtBullet3)
+            SectionBullet(s.helpServerMgmtBullet4)
+            SectionBullet(s.helpServerMgmtBullet5)
 
             SectionTitle(s.helpStep1)
             SectionBody(s.helpStep1Body)
@@ -100,6 +109,7 @@ fun HelpScreen(
             HelpQA(s.helpFaq3Q, s.helpFaq3A)
             HelpQA(s.helpFaq4Q, s.helpFaq4A)
             HelpQA(s.helpFaq5Q, s.helpFaq5A)
+            HelpQA(s.helpFaq6Q, s.helpFaq6A)
 
             SectionTitle(s.helpSecurityTitle)
             SectionBullet(s.helpSecBullet1)
@@ -151,7 +161,7 @@ fun HelpScreen(
                 }
                 is UpdateUiState.Error -> {
                     Text(
-                        text = s.updateGithubFailed,
+                        text = (updateState as UpdateUiState.Error).message,
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.error,
                     )
@@ -200,9 +210,10 @@ fun HelpScreen(
             onDownload = {
                 showUpdateDialog = false
                 if (avail.downloadUrl != null) {
+                    val proxiedUrl = GitHubReleaseService.proxiedDownloadUrl(avail.downloadUrl)
                     DownloadHelper.downloadApk(
                         context,
-                        avail.downloadUrl,
+                        proxiedUrl,
                         "OConnector-v${avail.version}.apk"
                     )
                     Toast.makeText(context, "Download started", Toast.LENGTH_SHORT).show()

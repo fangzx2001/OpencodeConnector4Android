@@ -222,9 +222,10 @@ internal fun ExpandableSegment(
     showDuration: Boolean = false,
 ) {
     val s = AppLocale.strings
-    // Default expanded for completed thinking/tool segments so content doesn't
-    // "disappear" when transitioning from streaming panel → parsed message.
-    var expanded by remember { mutableStateOf(!isStreaming) }
+    // Default collapsed for all segments. Streaming segments auto-expand via
+    // LaunchedEffect(isStreaming) below. The "disappear" bug is handled by the
+    // ViewModel keeping streaming segments visible until the message is confirmed.
+    var expanded by remember { mutableStateOf(false) }
     var startTime by remember { mutableStateOf<Long?>(null) }
     var durationSec by remember { mutableStateOf<Int?>(null) }
 
@@ -340,6 +341,7 @@ internal fun ChatInputBar(
     onSelectModel: (ModelInfo) -> Unit,
     isLoadingModels: Boolean,
     contextUsageK: String,
+    onScrollToBottom: () -> Unit = {},
 ) {
     val s = AppLocale.strings
     var modelDropdownExpanded by remember { mutableStateOf(false) }
@@ -369,15 +371,36 @@ internal fun ChatInputBar(
                     .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                // Left key — reserved / empty
+                // Left key — scroll to bottom
+                val leftKeyInteractionSource = remember { MutableInteractionSource() }
+                val leftKeyPressed by leftKeyInteractionSource.interactions.collectAsState(
+                    initial = null
+                )
+                val isLeftKeyPressed = leftKeyPressed is PressInteraction.Press
                 Box(
                     modifier = Modifier
                         .weight(1f)
                         .fillMaxWidth()
-                        .height(40.dp),
+                        .height(40.dp)
+                        .clickable(
+                            interactionSource = leftKeyInteractionSource,
+                            indication = null,
+                        ) { onScrollToBottom() }
+                        .background(
+                            if (isLeftKeyPressed) {
+                                MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+                            } else {
+                                Color.Transparent
+                            }
+                        ),
                     contentAlignment = Alignment.Center,
                 ) {
-                    // Reserved for future use
+                    Icon(
+                        imageVector = Icons.Default.ExpandMore,
+                        contentDescription = null,
+                        modifier = Modifier.size(20.dp),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
                 }
 
                 // Divider 1

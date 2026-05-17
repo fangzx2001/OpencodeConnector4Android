@@ -3,14 +3,17 @@ package com.opencode.remote.ui.connection
 import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.opencode.remote.data.api.dto.ServerInfo
 import com.opencode.remote.data.datastore.ConnectionConfig
 import com.opencode.remote.data.datastore.ConnectionPreferences
+import com.opencode.remote.data.datastore.ServerManager
 import com.opencode.remote.data.repository.OConnectorRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.util.UUID
 import javax.inject.Inject
 
 data class ConnectionUiState(
@@ -20,6 +23,7 @@ data class ConnectionUiState(
     val password: String = "",
     val useTls: Boolean = false,
     val insecureTrust: Boolean = false,
+    val serverName: String = "",
     val isConnecting: Boolean = false,
     val isConnected: Boolean = false,
     val error: String? = null,
@@ -29,6 +33,7 @@ data class ConnectionUiState(
 class ConnectionViewModel @Inject constructor(
     private val repository: OConnectorRepository,
     private val preferences: ConnectionPreferences,
+    private val serverManager: ServerManager,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(ConnectionUiState())
@@ -77,6 +82,10 @@ class ConnectionViewModel @Inject constructor(
         _uiState.update { it.copy(password = password, error = null) }
     }
 
+    fun onServerNameChange(name: String) {
+        _uiState.update { it.copy(serverName = name, error = null) }
+    }
+
     fun onUseTlsChange(useTls: Boolean) {
         _uiState.update { it.copy(useTls = useTls) }
     }
@@ -117,6 +126,7 @@ class ConnectionViewModel @Inject constructor(
                 withContext(Dispatchers.IO) {
                     repository.connect(config)
                 }
+                repository.setServerName(state.serverName.trim())
 
                 // Save preferences
                 preferences.saveConfig(config)
@@ -160,6 +170,81 @@ class ConnectionViewModel @Inject constructor(
 
     fun clearError() {
         _uiState.update { it.copy(error = null) }
+    }
+
+    fun saveAndConnect() {
+        val state = _uiState.value
+        val host = state.host.trim()
+        val port = state.port.trim().toIntOrNull()
+        val s = com.opencode.remote.ui.strings.AppLocale.strings
+
+        if (host.isEmpty()) {
+            _uiState.update { it.copy(error = s.errEnterIp) }
+            return
+        }
+        if (port == null || port !in 1..65535) {
+            _uiState.update { it.copy(error = s.errInvalidPort) }
+            return
+        }
+
+        viewModelScope.launch {
+            _uiState.update { it.copy(isConnecting = true, error = null) }
+
+            try {
+                val serverId = UUID.randomUUID().toString()
+                val serverInfo = ServerInfo(
+                    id = serverId,
+                    name = state.serverName.trim(),
+                    host = host,
+                    port = port,
+                    username = state.username.trim(),
+                    useTls = state.useTls,
+                    insecureTrust = state.insecureTrust,
+                )
+                serverManager.addServer(serverInfo, state.password)
+
+                val config = ConnectionConfig(
+                    serverId = serverId,
+                    host = host,
+                    port = port,
+                    username = state.username.trim(),
+                    password = state.password,
+                    useTls = state.useTls,
+                    insecureTrust = state.insecureTrust,
+                )
+
+                withContext(Dispatchers.IO) { repository.connect(config) }
+                repository.setServerName(state.serverName.trim())
+
+                val success = withContext(Dispatchers.IO) { repository.testConnection() }
+
+                if (success) {
+                    serverManager.saveLastActiveServerId(serverId)
+                    _uiState.update { it.copy(isConnecting = false, isConnected = true) }
+                } else {
+                    repository.disconnect()
+                    _uiState.update {
+                        it.copy(
+                            isConnecting = false,
+                            error = s.errCannotConnect
+                        )
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Save & connect failed", e)
+                try {
+                    repository.disconnect()
+                } catch (disconnectError: Exception) {
+                    Log.w(TAG, "Disconnect also failed", disconnectError)
+                }
+                _uiState.update {
+                    it.copy(
+                        isConnecting = false,
+                        error = s.errConnectionFailed.replace("%s", e.localizedMessage ?: e.javaClass.simpleName)
+                    )
+                }
+            }
+        }
     }
 
     fun saveLanguage(lang: String) {

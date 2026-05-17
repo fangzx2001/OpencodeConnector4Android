@@ -39,15 +39,16 @@ class SseForegroundService : Service() {
             startForeground(NOTIFICATION_ID, notification)
         }
 
-        if (sseJob == null || sseJob?.isActive == false) {
-            sseJob = appScope.launch {
-                try {
-                    sseClient.subscribeToEvents().collect { event ->
-                        eventBus.emit(event)
-                    }
-                } catch (e: Exception) {
-                    Log.w(TAG, "SSE collection stopped: ${e.message}")
+        // Cancel existing SSE collection if any (handles server switch)
+        sseJob?.cancel()
+
+        sseJob = appScope.launch {
+            try {
+                sseClient.subscribeToEvents().collect { event ->
+                    eventBus.emit(event)
                 }
+            } catch (e: Exception) {
+                Log.w(TAG, "SSE collection stopped: ${e.message}")
             }
         }
 

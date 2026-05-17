@@ -2,6 +2,33 @@
 
 All notable changes to OConnector will be documented in this file.
 
+## [1.3.0] - 2026-05-16
+
+### Added
+
+- **Multi-server management** — new Server List home screen. Add, connect, and manage multiple OpenCode servers. Each server stores its own name, host, port, credentials, and TLS settings. The app no longer boots directly into a single-server connection page.
+- **Scroll-to-bottom button** — the previously unused left piano key in the chat input bar is now a "scroll to bottom" button. Taps re-enable auto-scroll and jump to the latest message.
+- **Keyboard-aware auto-scroll** — when the soft keyboard opens, the chat automatically scrolls to keep the latest messages visible above the input bar.
+- **Per-project memo panel** — swipe left on the project session list to open a slide-in memo panel (280dp, 350ms animation, same pattern as the chat screen file browser). Create, edit, and delete memos scoped to each project. Collapsed memos show a checkbox for marking done; expanded memos have editable title and content fields. Long-press to delete with confirmation dialog. Memos are persisted locally via DataStore and survive app restarts.
+
+### Changed
+
+- **Language toggle & help button moved to Server List** — removed from the Add Server / Connection screen to avoid duplication. Now only available on the Server List home screen.
+- **Tips card moved to Server List** — connection tips are now shown at the bottom of the Server List screen instead of the Add Server form.
+- **Update check moved to Server List** — the download button (appears when a new version is available) now shows on the Server List home screen on app launch, instead of only when visiting the Add Server page.
+
+### Fixed
+
+- **Auto-scroll root cause (frame race)** — initial scroll used `isLoading` (Composition phase) as trigger, but `LazyColumn.totalItemsCount` only updates in Layout phase. This frame gap caused `scrollToItem(0)` (top) instead of bottom. Replaced with `snapshotFlow { layoutCount to dataCount }` that only fires when layout catches up to data.
+- **AI output scroll stuck at agent name** — `scrollToItem(N-1)` anchors viewport at the top of the `__active_assistant__` item (which contains agent name + thinking + text). Added forward `scrollBy(100_000f)` after `scrollToItem` to ensure the absolute bottom is visible.
+- **Streaming output auto-scroll failure** — re-designed the entire scroll pipeline: (1) initial scroll via `snapshotFlow`, (2) user scroll tracking only after initial scroll completes, (3) content-change auto-scroll with forward correction, (4) re-enable on new message send.
+- **ExpandableSegment default collapsed** — all thinking/tool/code bubbles now default to collapsed (`mutableStateOf(false)`). Previously set to expanded as a workaround for a message disappearance bug; the ViewModel retry logic now prevents that bug from recurring.
+- **APK download proxied for China** — `browser_download_url` from GitHub API points to `github.com` (blocked in China). APK downloads are now automatically routed through `gh-proxy.com` mirror so users on domestic networks can update without a VPN.
+- **Question/Permission bubble lost after app kill** — Q/P blocking state was stored only in memory (`@Singleton` Repository), so process death cleared it. Now persisted to `SharedPreferences` (disk) alongside memory cache. Every `save`/`clear` does dual-write; every `get` checks memory first then falls back to disk. Survives app kill, device restart, and force stop.
+- **Streaming output lost after app kill** — same fix: streaming segments, pending message ID, and agent name are now persisted to disk. Re-entering a session after process death restores the AI output progress and continues streaming.
+- **RecoveryBubble "Check Status" button not working** — the button called `initialize()` which was guarded by `!isBlocked` and `!recoveryPending`, so it always skipped the actual re-check. Added dedicated `recheckBlockingState()` method that clears heuristic state first, tries cache (memory→disk), then falls back to a fresh server message query.
+- **Connection form scroll & password visibility** — Add Server form now scrolls when keyboard or TLS options push the Connect button off-screen. Password field has a visibility toggle.
+
 ## [1.2.0] - 2026-05-11
 
 ### Added

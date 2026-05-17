@@ -1,13 +1,11 @@
 package com.opencode.remote.ui.theme
 
 import android.app.Activity
-import android.os.Build
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.ui.graphics.toArgb
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.core.view.WindowCompat
 
@@ -60,14 +58,16 @@ fun OConnectorTheme(
 
     val view = LocalView.current
     if (!view.isInEditMode) {
-        SideEffect {
+        // Use DisposableEffect instead of SideEffect to ensure window colors
+        // update synchronously with the theme — no animation lag.
+        DisposableEffect(darkTheme) {
             val window = (view.context as Activity).window
-            // Status bar and navigation bar match the surface/background color
             window.statusBarColor = colorScheme.surface.toArgb()
             window.navigationBarColor = colorScheme.surface.toArgb()
             val controller = WindowCompat.getInsetsController(window, view)
             controller.isAppearanceLightStatusBars = !darkTheme
             controller.isAppearanceLightNavigationBars = !darkTheme
+            onDispose { }
         }
     }
 

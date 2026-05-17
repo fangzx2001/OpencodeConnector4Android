@@ -8,6 +8,7 @@ import androidx.datastore.preferences.core.*
 import androidx.datastore.preferences.preferencesDataStore
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
+import com.opencode.remote.data.api.dto.ServerInfo
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.catch
@@ -15,7 +16,7 @@ import kotlinx.coroutines.flow.map
 import javax.inject.Inject
 import javax.inject.Singleton
 
-private val Context.dataStore: DataStore<Preferences> by preferencesDataStore(name = "connection_prefs")
+internal val Context.dataStore: DataStore<Preferences> by preferencesDataStore(name = "connection_prefs")
 
 private const val ENCRYPTED_PREFS_NAME = "connection_encrypted_prefs"
 private const val KEY_ENCRYPTED_PASSWORD = "encrypted_password"
@@ -28,11 +29,13 @@ data class ConnectionConfig(
     val useTls: Boolean = false,
     val insecureTrust: Boolean = false,
     val autoReconnect: Boolean = true,
+    val serverId: String? = null,
 )
 
 @Singleton
 class ConnectionPreferences @Inject constructor(
     @ApplicationContext private val context: Context,
+    private val serverManager: ServerManager,
 ) {
     companion object {
         private const val TAG = "ConnectionPreferences"
@@ -208,4 +211,22 @@ class ConnectionPreferences @Inject constructor(
             Log.e(TAG, "Failed to save config", e)
         }
     }
+
+    // --- Multi-server delegation to ServerManager ---
+
+    val savedServers: Flow<List<ServerInfo>> = serverManager.servers
+
+    suspend fun addServer(info: ServerInfo, password: String) =
+        serverManager.addServer(info, password)
+
+    suspend fun deleteServer(id: String) =
+        serverManager.deleteServer(id)
+
+    fun getServerPassword(id: String): String? =
+        serverManager.getPassword(id)
+
+    val lastActiveServerId: Flow<String?> = serverManager.lastActiveServerId
+
+    suspend fun saveLastActiveServerId(id: String) =
+        serverManager.saveLastActiveServerId(id)
 }

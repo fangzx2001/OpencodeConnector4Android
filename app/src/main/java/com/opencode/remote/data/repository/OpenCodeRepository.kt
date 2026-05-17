@@ -1,14 +1,21 @@
 package com.opencode.remote.data.repository
 
 import android.content.Context
+import android.content.SharedPreferences
+import android.util.Log
 import com.opencode.remote.data.api.OConnectorApiClient
 import com.opencode.remote.data.api.OConnectorSseClient
 import com.opencode.remote.data.api.dto.*
 import com.opencode.remote.data.datastore.ConnectionConfig
 import com.opencode.remote.service.SseForegroundService
 import com.opencode.remote.ui.chat.ResponseSegment
+import com.opencode.remote.ui.chat.PermissionRequestData
+import com.opencode.remote.ui.chat.QuestionRequestData
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.Flow
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.builtins.ListSerializer
+import kotlinx.serialization.json.Json
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -31,6 +38,8 @@ interface OConnectorRepository {
 
     fun connect(config: ConnectionConfig)
     fun disconnect()
+    fun switchToServer(serverId: String, config: ConnectionConfig)
+    fun getActiveServerId(): String?
 
     // ─── Session Operations ──────────────────────────────────────────
 
@@ -89,6 +98,11 @@ interface OConnectorRepository {
     var activeSessionId: String?
     var activeSessionDirectory: String?
 
+    // ─── Server Name ─────────────────────────────────────────────────
+
+    fun setServerName(name: String?)
+    fun getCurrentServerName(): String?
+
     // ─── SSE Events ──────────────────────────────────────────────────
 
     fun subscribeToEvents(): Flow<ServerEvent>
@@ -101,7 +115,23 @@ interface OConnectorRepository {
     fun getStreamingBlocksState(): StreamingState
     fun getStreamingPendingMsgId(): String?
     fun clearStreaming()
+
+    // ─── Blocking State Cache (survives ViewModel recreation) ───────
+
+    /** Persist blocking state for a session (question/permission data). */
+    fun saveBlockingState(sessionId: String, permission: PermissionRequestData?, question: QuestionRequestData?)
+    /** Retrieve persisted blocking state for a session. Returns null if none. */
+    fun getBlockingState(sessionId: String): BlockingStateCache?
+    /** Clear persisted blocking state for a session. */
+    fun clearBlockingState(sessionId: String)
 }
+
+/** Cache entry for blocking state, stored by session ID. */
+@Serializable
+data class BlockingStateCache(
+    val permission: PermissionRequestData? = null,
+    val question: QuestionRequestData? = null,
+)
 
 /**
  * Concrete implementation that manages the API client lifecycle and exposes
@@ -112,19 +142,127 @@ class OConnectorRepositoryImpl @Inject constructor(
     private val apiClient: OConnectorApiClient,
     private val sseClient: OConnectorSseClient,
     @ApplicationContext private val context: Context,
+    private val json: Json,
 ) : OConnectorRepository {
+
+    companion object {
+        private const val TAG = "OConnectorRepository"
+    }
 
     private var connected = false
     private var cachedAgents: List<AgentInfo>? = null
     private var agentsCacheTime: Long = 0
     private var cachedModels: List<ModelInfo>? = null
     private var modelsCacheTime: Long = 0
+    private var activeServerId: String? = null
+    private var activeServerName: String? = null
 
     override var activeSessionId: String? = null
     override var activeSessionDirectory: String? = null
 
+    // ─── Disk persistence for state that must survive process death ───────
+    private val statePrefs: SharedPreferences by lazy {
+        context.getSharedPreferences("opencode_state_cache", Context.MODE_PRIVATE)
+    }
+
+    private fun persistBlockingState(sessionId: String, cache: BlockingStateCache?) {
+        try {
+            if (cache != null && (cache.permission != null || cache.question != null)) {
+                val encoded = json.encodeToString(BlockingStateCache.serializer(), cache)
+                statePrefs.edit().putString("block_$sessionId", encoded).apply()
+            } else {
+                statePrefs.edit().remove("block_$sessionId").apply()
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to persist blocking state for $sessionId", e)
+        }
+    }
+
+    private fun restoreBlockingState(sessionId: String): BlockingStateCache? {
+        return try {
+            val encoded = statePrefs.getString("block_$sessionId", null)
+            if (encoded != null) json.decodeFromString(BlockingStateCache.serializer(), encoded) else null
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to restore blocking state for $sessionId", e)
+            null
+        }
+    }
+
+    private fun clearBlockingStateDisk(sessionId: String) {
+        statePrefs.edit().remove("block_$sessionId").apply()
+    }
+
+    private fun persistStreamingState() {
+        try {
+            val sessionId = _streamingSessionId
+            if (sessionId != null) {
+                val segmentsJson = json.encodeToString(ListSerializer(ResponseSegment.serializer()), _streamingBlocks)
+                statePrefs.edit()
+                    .putString("stream_session", sessionId)
+                    .putString("stream_segments", segmentsJson)
+                    .putString("stream_agent", _streamingAgent)
+                    .putString("stream_pending_msg", _streamingPendingMsgId)
+                    .apply()
+            } else {
+                statePrefs.edit()
+                    .remove("stream_session")
+                    .remove("stream_segments")
+                    .remove("stream_agent")
+                    .remove("stream_pending_msg")
+                    .apply()
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to persist streaming state", e)
+        }
+    }
+
+    private fun clearStreamingDisk() {
+        statePrefs.edit()
+            .remove("stream_session")
+            .remove("stream_segments")
+            .remove("stream_agent")
+            .remove("stream_pending_msg")
+            .apply()
+    }
+
+    private fun restoreStreamingStateFromDisk(): StreamingState? {
+        return try {
+            val sessionId = statePrefs.getString("stream_session", null) ?: return null
+            val segmentsJson = statePrefs.getString("stream_segments", null) ?: return null
+            val segments = json.decodeFromString(ListSerializer(ResponseSegment.serializer()), segmentsJson)
+            val agent = statePrefs.getString("stream_agent", null)
+            StreamingState(sessionId, segments, agent)
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to restore streaming state from disk", e)
+            null
+        }
+    }
+
+    private fun restoreStreamingPendingMsgId(): String? {
+        return try {
+            statePrefs.getString("stream_pending_msg", null)
+        } catch (e: Exception) {
+            null
+        }
+    }
+
     override val isConnected: Boolean
         get() = connected
+
+    override fun setServerName(name: String?) {
+        activeServerName = name
+    }
+
+    override fun getCurrentServerName(): String? = activeServerName
+
+    override fun switchToServer(serverId: String, config: ConnectionConfig) {
+        if (activeServerId == serverId && connected) return  // already connected to this server
+        if (connected) disconnect()
+        connect(config)
+        activeServerId = serverId
+    }
+
+    override fun getActiveServerId(): String? = activeServerId
 
     /**
      * Initialize connection to the OpenCode server.
@@ -154,6 +292,8 @@ class OConnectorRepositoryImpl @Inject constructor(
         modelsCacheTime = 0
         activeSessionId = null
         activeSessionDirectory = null
+        activeServerId = null
+        activeServerName = null
     }
 
     private fun requireClient(): OConnectorApiClient {
@@ -300,25 +440,76 @@ class OConnectorRepositoryImpl @Inject constructor(
         _streamingBlocks = emptyList()
         _streamingAgent = agent
         _streamingPendingMsgId = null
+        persistStreamingState()
     }
 
     override fun setStreamingBlocks(segments: List<ResponseSegment>) {
         _streamingBlocks = segments
+        persistStreamingState()
     }
 
     override fun setStreamingPendingMsgId(msgId: String?) {
         _streamingPendingMsgId = msgId
+        persistStreamingState()
     }
 
-    override fun getStreamingBlocksState(): StreamingState =
-        StreamingState(_streamingSessionId, _streamingBlocks, _streamingAgent)
+    override fun getStreamingBlocksState(): StreamingState {
+        // Memory cache first
+        if (_streamingSessionId != null) {
+            return StreamingState(_streamingSessionId, _streamingBlocks, _streamingAgent)
+        }
+        // Fall back to disk (survives process death)
+        val fromDisk = restoreStreamingStateFromDisk()
+        if (fromDisk != null && fromDisk.sessionId != null) {
+            _streamingSessionId = fromDisk.sessionId
+            _streamingBlocks = fromDisk.segments
+            _streamingAgent = fromDisk.agent
+            return fromDisk
+        }
+        return StreamingState(null, emptyList(), null)
+    }
 
-    override fun getStreamingPendingMsgId(): String? = _streamingPendingMsgId
+    override fun getStreamingPendingMsgId(): String? {
+        if (_streamingPendingMsgId != null) return _streamingPendingMsgId
+        return restoreStreamingPendingMsgId()
+    }
 
     override fun clearStreaming() {
         _streamingSessionId = null
         _streamingBlocks = emptyList()
         _streamingAgent = null
         _streamingPendingMsgId = null
+        clearStreamingDisk()
+    }
+
+    // ─── Blocking State Cache ──────────────────────────────────────
+
+    private val _blockingStateCache = mutableMapOf<String, BlockingStateCache>()
+
+    override fun saveBlockingState(sessionId: String, permission: PermissionRequestData?, question: QuestionRequestData?) {
+        if (permission != null || question != null) {
+            val cache = BlockingStateCache(permission, question)
+            _blockingStateCache[sessionId] = cache
+            persistBlockingState(sessionId, cache)
+        } else {
+            _blockingStateCache.remove(sessionId)
+            persistBlockingState(sessionId, null)
+        }
+    }
+
+    override fun getBlockingState(sessionId: String): BlockingStateCache? {
+        // Memory cache first, then fall back to disk (survives process death)
+        val cached = _blockingStateCache[sessionId]
+        if (cached != null) return cached
+        val fromDisk = restoreBlockingState(sessionId)
+        if (fromDisk != null) {
+            _blockingStateCache[sessionId] = fromDisk  // warm memory cache
+        }
+        return fromDisk
+    }
+
+    override fun clearBlockingState(sessionId: String) {
+        _blockingStateCache.remove(sessionId)
+        clearBlockingStateDisk(sessionId)
     }
 }

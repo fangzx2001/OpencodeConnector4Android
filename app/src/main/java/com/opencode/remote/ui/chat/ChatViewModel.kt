@@ -14,6 +14,7 @@ import com.opencode.remote.ui.strings.AppLocale
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CancellationException
+import kotlinx.serialization.Serializable
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.delay
@@ -22,6 +23,7 @@ import kotlinx.coroutines.launch
 import javax.inject.Inject
 
 /** A single segment in the streaming or completed assistant response. */
+@Serializable
 data class ResponseSegment(
     val type: String,  // "thinking", "text", "tool"
     val text: String,
@@ -30,6 +32,7 @@ data class ResponseSegment(
 )
 
 /** Permission request data extracted from permission.asked SSE event. */
+@Serializable
 data class PermissionRequestData(
     val id: String,
     val sessionID: String,
@@ -40,6 +43,7 @@ data class PermissionRequestData(
 )
 
 /** Question request data extracted from question.asked SSE event. */
+@Serializable
 data class QuestionRequestData(
     val id: String,
     val sessionID: String,
@@ -96,6 +100,7 @@ data class ChatDisplayState(
     val pendingPermission: PermissionRequestData? = null,
     val pendingQuestion: QuestionRequestData? = null,
     val isBlocked: Boolean = false,  // true when AI is waiting for user response
+    val recoveryPending: Boolean = false,  // true when heuristic detected possible interrupted blocking state
 )
 
 data class ChatUiState(
@@ -139,6 +144,7 @@ data class ChatUiState(
     val pendingPermission get() = chatDisplay.pendingPermission
     val pendingQuestion get() = chatDisplay.pendingQuestion
     val isBlocked get() = chatDisplay.isBlocked
+    val recoveryPending get() = chatDisplay.recoveryPending
 }
 
 @HiltViewModel
@@ -154,6 +160,7 @@ class ChatViewModel @Inject constructor(
     private var sseJob: Job? = null
     private var pollingJob: Job? = null
     private var streamingWatchdogJob: Job? = null
+    private var blockingWatchdogJob: Job? = null
     private var lastSseEventTime = 0L  // Timestamp of last SSE event — used for fallback polling
 
     /**
@@ -195,12 +202,16 @@ class ChatViewModel @Inject constructor(
      */
     fun initialize(sessionId: String, directory: String? = null) {
         pollingJob?.cancel()
+        blockingWatchdogJob?.cancel()
         lastSseEventTime = System.currentTimeMillis()
         _uiState.update {
             it.copy(
                 sessionMeta = it.sessionMeta.copy(sessionId = sessionId, sessionDirectory = directory),
                 // Reset streaming + display state to prevent stale data from previous session
                 streaming = StreamingDisplayState(),
+                // NOTE: .copy() only overrides listed fields — blocking state is preserved
+                // when the same ViewModel instance calls initialize() again. For cross-ViewModel
+                // recovery (new NavBackStackEntry), the repository cache is used (Step 5).
                 chatDisplay = it.chatDisplay.copy(
                     isLoading = true,
                     contextUsageK = "0K",
@@ -211,6 +222,7 @@ class ChatViewModel @Inject constructor(
                 ),
             )
         }
+        Log.d(TAG, "initialize() preserving blocking state: permission=${_uiState.value.pendingPermission != null}, question=${_uiState.value.pendingQuestion != null}, blocked=${_uiState.value.isBlocked}")
 
         // Track active session for notification deep link
         repository.activeSessionId = sessionId
@@ -333,6 +345,27 @@ class ChatViewModel @Inject constructor(
             // This eliminates race conditions where stale SSE events arrive
             // before streaming state is set, causing premature clearing.
             subscribeToEvents()
+
+            // ── Step 5: Restore blocking state from cache or message check ──
+            // First try to restore from repository cache (survives ViewModel recreation).
+            // If no cached state, fall back to checking message completion.
+            val cached = repository.getBlockingState(initSessionId)
+            val currentDisplay = _uiState.value.chatDisplay
+            if (cached != null && !currentDisplay.isBlocked) {
+                val perm = cached.permission
+                val qst = cached.question
+                if (perm != null || qst != null) {
+                    Log.d(TAG, "Restoring blocking state from cache: perm=${perm != null} qst=${qst != null}")
+                    _uiState.update { it.copy(chatDisplay = it.chatDisplay.copy(
+                        pendingPermission = perm,
+                        pendingQuestion = qst,
+                        isBlocked = true,
+                    ))}
+                    startBlockingWatchdog()
+                }
+            } else {
+                checkSessionBlocking(messages)
+            }
 
             // Start fallback polling (only when SSE stalls)
             startFallbackPolling(initSessionId)
@@ -642,6 +675,17 @@ class ChatViewModel @Inject constructor(
                         updateContextUsage()
                     }
                 }
+                // session.idle means the AI turn is complete — clear blocking state
+                // ONLY when this idle corresponds to the current streaming turn.
+                // Do NOT clear blocking state during reconnection (isStreaming=false, isSending=false)
+                // because the session may still be waiting for question/permission answer.
+                val blockedState = _uiState.value.chatDisplay
+                if ((state.isStreaming || state.isSending) &&
+                    (blockedState.pendingPermission != null || blockedState.pendingQuestion != null || blockedState.isBlocked)) {
+                    Log.d(TAG, "session.idle — clearing blocking state after streaming turn completed")
+                    clearBlockingState()
+                    permissionQueue.clear()
+                }
             }
 
             // ── Session compacted — context reset ──
@@ -699,6 +743,8 @@ class ChatViewModel @Inject constructor(
                     _uiState.update { it.copy(chatDisplay = it.chatDisplay.copy(
                         pendingPermission = request, isBlocked = true,
                     ))}
+                    repository.saveBlockingState(sessionId, request, _uiState.value.pendingQuestion)
+                    startBlockingWatchdog()
                 }
             }
 
@@ -718,6 +764,8 @@ class ChatViewModel @Inject constructor(
                 _uiState.update { it.copy(chatDisplay = it.chatDisplay.copy(
                     pendingQuestion = request, isBlocked = true,
                 ))}
+                repository.saveBlockingState(currentSessionId, _uiState.value.pendingPermission, request)
+                startBlockingWatchdog()
             }
 
             // ── Internal sync (ignore) ──
@@ -824,7 +872,8 @@ class ChatViewModel @Inject constructor(
     fun sendMessage() {
         val text = _uiState.value.inputText.trim()
         if (text.isEmpty()) return
-        if (_uiState.value.isBlocked) return
+        // Allow sending during recoveryPending — user is resuming an interrupted conversation
+        if (_uiState.value.isBlocked && !_uiState.value.recoveryPending) return
 
         val state = _uiState.value
 
@@ -853,6 +902,13 @@ class ChatViewModel @Inject constructor(
         completedMessageIds.clear()
         partTypeMap.clear()
         deltaLogCounter = 0
+        // Clear recovery state if present — user is sending a new message to resume
+        if (_uiState.value.recoveryPending) {
+            blockingWatchdogJob?.cancel()
+            _uiState.update { it.copy(chatDisplay = it.chatDisplay.copy(
+                isBlocked = false, recoveryPending = false,
+            ))}
+        }
 
         // 1. Immediately add user message to local list (optimistic update)
         val localUserMsg = MessageInfo(
@@ -1256,7 +1312,11 @@ class ChatViewModel @Inject constructor(
             _uiState.update { it.copy(chatDisplay = it.chatDisplay.copy(
                 pendingPermission = next, isBlocked = true,
             ))}
+            repository.saveBlockingState(_uiState.value.sessionId, next, _uiState.value.pendingQuestion)
+            startBlockingWatchdog()  // Start timeout for queued permission
         } else {
+            blockingWatchdogJob?.cancel()  // Cancel orphaned watchdog
+            repository.clearBlockingState(_uiState.value.sessionId)
             _uiState.update { it.copy(chatDisplay = it.chatDisplay.copy(
                 pendingPermission = null, isBlocked = false,
             ))}
@@ -1264,8 +1324,10 @@ class ChatViewModel @Inject constructor(
     }
 
     private fun clearBlockingState() {
+        blockingWatchdogJob?.cancel()
+        repository.clearBlockingState(_uiState.value.sessionId)
         _uiState.update { it.copy(chatDisplay = it.chatDisplay.copy(
-            pendingPermission = null, pendingQuestion = null, isBlocked = false,
+            pendingPermission = null, pendingQuestion = null, isBlocked = false, recoveryPending = false,
         ))}
     }
 
@@ -1397,11 +1459,130 @@ class ChatViewModel @Inject constructor(
         }
     }
 
+    /**
+     * Watchdog that auto-clears stale blocking state after 120 seconds.
+     * If the AI is waiting for permission/question reply but no response is given
+     * within 120s, the server has likely timed out and the blocking state is stale.
+     */
+    private fun startBlockingWatchdog() {
+        blockingWatchdogJob?.cancel()
+        blockingWatchdogJob = viewModelScope.launch {
+            delay(120_000)  // 120 seconds
+            val state = _uiState.value.chatDisplay
+            if (state.pendingPermission != null || state.pendingQuestion != null || state.isBlocked) {
+                Log.w(TAG, "Blocking watchdog: stale state after 120s, auto-clearing")
+                clearBlockingState()
+                permissionQueue.clear()
+                // Notify user via Toast
+                android.widget.Toast.makeText(
+                    appContext,
+                    com.opencode.remote.ui.strings.AppLocale.strings.blockingStateExpired,
+                    android.widget.Toast.LENGTH_LONG
+                ).show()
+            }
+        }
+    }
+
+    /**
+     * Immediate recovery check: runs right after message loading in initialize(). Detects if the AI was interrupted
+     * mid-work by checking if the last assistant message has no completed timestamp. This covers question, permission,
+     * and any other blocking state uniformly. No delay — runs synchronously.
+     */
+    private fun checkSessionBlocking(messages: List<MessageInfo>) {
+        val state = _uiState.value.chatDisplay
+        // If session is actively streaming, don't trigger recovery
+        val streaming = _uiState.value.streaming
+        if (streaming.isStreaming || streaming.isSending) {
+            Log.d(TAG, "checkSessionBlocking: session is streaming, skipping heuristic")
+            return
+        }
+        // If recovery already pending from a previous check, skip redundant heuristic
+        if (state.recoveryPending) {
+            Log.d(TAG, "checkSessionBlocking: recovery already pending, skipping heuristic")
+            return
+        }
+        // If blocking state is already set (preserved from T1 or SSE re-delivery), skip heuristic
+        if (state.pendingPermission != null || state.pendingQuestion != null) {
+            Log.d(TAG, "checkSessionBlocking: blocking state already set, skipping heuristic")
+            return
+        }
+
+        // Find the last assistant message
+        val lastAssistant = messages.lastOrNull { it.role == "assistant" } ?: return
+        val hasCompletedTimestamp = lastAssistant.info.time?.completed != null && lastAssistant.info.time.completed > 0
+
+        if (hasCompletedTimestamp) {
+            // Last assistant message completed normally — not blocked
+            Log.d(TAG, "checkSessionBlocking: last assistant completed, session not blocked")
+            return
+        }
+
+        // Last assistant has no completed timestamp = AI was interrupted mid-work
+        // (question or permission or any blocking state — all show as incomplete message)
+        Log.d(TAG, "checkSessionBlocking: last assistant incomplete (no completed timestamp), triggering recovery")
+        _uiState.update { it.copy(chatDisplay = it.chatDisplay.copy(
+            isBlocked = true,
+            recoveryPending = true,
+        ))}
+        startBlockingWatchdog()
+    }
+
+    /** Dismiss recovery/heuristic blocking state — user chose to ignore. */
+    fun dismissBlocking() {
+        blockingWatchdogJob?.cancel()
+        permissionQueue.clear()
+        repository.clearBlockingState(_uiState.value.sessionId)
+        _uiState.update { it.copy(chatDisplay = it.chatDisplay.copy(
+            pendingPermission = null, pendingQuestion = null, isBlocked = false, recoveryPending = false,
+        ))}
+    }
+
+    /**
+     * Re-check blocking state when the user taps "Check Status" on the RecoveryBubble.
+     * This clears the heuristic-only state and tries to recover real data from
+     * cache (memory + disk), falling back to a fresh server message check.
+     */
+    fun recheckBlockingState() {
+        val sessionId = _uiState.value.sessionId
+        if (sessionId.isBlank()) return
+
+        // Clear current recovery-only state so guards don't block re-check
+        _uiState.update { it.copy(chatDisplay = it.chatDisplay.copy(
+            pendingPermission = null, pendingQuestion = null, isBlocked = false, recoveryPending = false,
+        ))}
+        blockingWatchdogJob?.cancel()
+
+        // Step 1: Try cache (memory → disk)
+        val cached = repository.getBlockingState(sessionId)
+        if (cached != null && (cached.permission != null || cached.question != null)) {
+            Log.d(TAG, "recheckBlockingState: restored from cache perm=${cached.permission != null} qst=${cached.question != null}")
+            _uiState.update { it.copy(chatDisplay = it.chatDisplay.copy(
+                pendingPermission = cached.permission,
+                pendingQuestion = cached.question,
+                isBlocked = true,
+            ))}
+            startBlockingWatchdog()
+            return
+        }
+
+        // Step 2: Load messages from server and run heuristic
+        viewModelScope.launch {
+            try {
+                val messages = repository.getMessages(sessionId, _uiState.value.sessionDirectory)
+                Log.d(TAG, "recheckBlockingState: loaded ${messages.size} messages, running heuristic")
+                checkSessionBlocking(messages)
+            } catch (e: Exception) {
+                Log.e(TAG, "recheckBlockingState: failed to load messages", e)
+            }
+        }
+    }
+
     override fun onCleared() {
         super.onCleared()
         batchFlushJob?.cancel()
         pollingJob?.cancel()
         sseJob?.cancel()
         streamingWatchdogJob?.cancel()
+        blockingWatchdogJob?.cancel()
     }
 }

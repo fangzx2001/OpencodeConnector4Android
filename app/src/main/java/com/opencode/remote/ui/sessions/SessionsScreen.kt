@@ -1,6 +1,10 @@
 package com.opencode.remote.ui.sessions
 
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -10,12 +14,14 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.opencode.remote.data.api.dto.SessionInfo
 import com.opencode.remote.ui.components.ErrorSnackbar
@@ -44,9 +50,11 @@ fun SessionsScreen(
                 title = {
                     Column {
                         Text(s.projects)
-                        uiState.projectName?.let { name ->
+                        val subtitle = uiState.currentServerName
+                            ?: uiState.projectName?.let { "${s.serverPath}: $it" }
+                        subtitle?.let {
                             Text(
-                                text = "${s.serverPath}: $name",
+                                text = it,
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 maxLines = 1,
@@ -226,6 +234,22 @@ fun ProjectSessionsScreen(
     val uiState by viewModel.uiState.collectAsState()
     val s = AppLocale.strings
     val folderName = directory.replace('\\', '/').substringAfterLast('/')
+    val density = LocalDensity.current
+
+    // ── Memo panel gesture + animation (same pattern as ChatScreen file panel) ──
+    var cumulativeDragX by remember { mutableFloatStateOf(0f) }
+    val dragThresholdPx = with(density) { 40.dp.toPx() }
+    val panelWidthDp = 280.dp
+    val memoPanelOffset by animateDpAsState(
+        targetValue = if (uiState.isMemoPanelOpen) 0.dp else panelWidthDp,
+        animationSpec = tween(durationMillis = 350, easing = FastOutSlowInEasing),
+        label = "memo_panel_offset",
+    )
+    val memoContentOffset by animateDpAsState(
+        targetValue = if (uiState.isMemoPanelOpen) -panelWidthDp else 0.dp,
+        animationSpec = tween(durationMillis = 350, easing = FastOutSlowInEasing),
+        label = "memo_content_offset",
+    )
 
     // Auto-refresh when navigating back to this screen
     LifecycleResumeEffect(Unit) {
@@ -246,111 +270,157 @@ fun ProjectSessionsScreen(
             .sortedByDescending { it.time?.updated ?: it.time?.created ?: 0L }
     }
 
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                title = {
-                    Column {
-                        Text(folderName)
-                        Text(
-                            text = directory,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            fontFamily = FontFamily.Monospace,
-                        )
-                    }
-                },
-                navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.Default.ArrowBack, contentDescription = s.helpBack)
-                    }
-                },
-                actions = {
-                    IconButton(onClick = { viewModel.toggleHideChildSessions() }) {
-                        Icon(
-                            imageVector = if (uiState.hideChildSessions) Icons.Default.VisibilityOff else Icons.Default.Visibility,
-                            contentDescription = if (uiState.hideChildSessions) s.showChildSessions else s.hideChildSessions,
-                        )
-                    }
-                    IconButton(onClick = { viewModel.loadSessions() }) {
-                        Icon(Icons.Default.Refresh, contentDescription = s.refresh)
-                    }
-                },
-            )
-        },
-        floatingActionButton = {
-            ExtendedFloatingActionButton(
-                onClick = { viewModel.createSession(directory) },
-                icon = { Icon(Icons.Default.Add, contentDescription = null) },
-                text = { Text(s.newSession) },
-                expanded = projectSessions.isEmpty(),
-            )
-        },
-    ) { padding ->
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(padding),
-        ) {
-            when {
-                uiState.isLoading -> {
-                    CircularProgressIndicator(
-                        modifier = Modifier.align(Alignment.Center),
+    // Outer Box with swipe gesture detection for memo panel
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .pointerInput(Unit) {
+                detectHorizontalDragGestures(
+                    onDragStart = { cumulativeDragX = 0f },
+                    onHorizontalDrag = { change, dragAmount ->
+                        cumulativeDragX += dragAmount
+                        if (!uiState.isMemoPanelOpen && cumulativeDragX < -dragThresholdPx) {
+                            change.consume()
+                            viewModel.setMemoPanelOpen(true, directory)
+                        } else if (uiState.isMemoPanelOpen && cumulativeDragX > dragThresholdPx) {
+                            change.consume()
+                            viewModel.closeMemoPanel()
+                        }
+                    },
+                    onDragEnd = { cumulativeDragX = 0f },
+                    onDragCancel = { cumulativeDragX = 0f },
+                )
+            }
+    ) {
+        // Main content — shifts left when memo panel opens
+        Box(modifier = Modifier.offset(x = memoContentOffset)) {
+            Scaffold(
+                topBar = {
+                    TopAppBar(
+                        title = {
+                            Column {
+                                Text(folderName)
+                                Text(
+                                    text = directory,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    fontFamily = FontFamily.Monospace,
+                                )
+                            }
+                        },
+                        navigationIcon = {
+                            IconButton(onClick = {
+                                if (uiState.isMemoPanelOpen) viewModel.closeMemoPanel() else onBack()
+                            }) {
+                                Icon(Icons.Default.ArrowBack, contentDescription = s.helpBack)
+                            }
+                        },
+                        actions = {
+                            IconButton(onClick = { viewModel.toggleHideChildSessions() }) {
+                                Icon(
+                                    imageVector = if (uiState.hideChildSessions) Icons.Default.VisibilityOff else Icons.Default.Visibility,
+                                    contentDescription = if (uiState.hideChildSessions) s.showChildSessions else s.hideChildSessions,
+                                )
+                            }
+                            IconButton(onClick = { viewModel.loadSessions() }) {
+                                Icon(Icons.Default.Refresh, contentDescription = s.refresh)
+                            }
+                        },
                     )
-                }
-
-                projectSessions.isEmpty() -> {
-                    Column(
-                        modifier = Modifier.align(Alignment.Center),
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.ChatBubbleOutline,
-                            contentDescription = null,
-                            modifier = Modifier.size(64.dp),
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                        Spacer(modifier = Modifier.height(16.dp))
-                        Text(
-                            text = s.noSessions,
-                            style = MaterialTheme.typography.titleMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Text(
-                            text = s.noSessionsHint,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                }
-
-                else -> {
-                    LazyColumn(
-                        contentPadding = PaddingValues(16.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp),
-                    ) {
-                        items(
-                            items = projectSessions,
-                            key = { it.id }
-                        ) { session ->
-                            SessionCard(
-                                session = session,
-                                onClick = { onSessionClick(session.id) },
-                                onDelete = { viewModel.deleteSession(session.id, directory) },
-                                onFork = { viewModel.forkSession(session.id, directory) },
+                },
+                floatingActionButton = {
+                    ExtendedFloatingActionButton(
+                        onClick = { viewModel.createSession(directory) },
+                        icon = { Icon(Icons.Default.Add, contentDescription = null) },
+                        text = { Text(s.newSession) },
+                        expanded = projectSessions.isEmpty(),
+                    )
+                },
+            ) { padding ->
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(padding),
+                ) {
+                    when {
+                        uiState.isLoading -> {
+                            CircularProgressIndicator(
+                                modifier = Modifier.align(Alignment.Center),
                             )
                         }
+
+                        projectSessions.isEmpty() -> {
+                            Column(
+                                modifier = Modifier.align(Alignment.Center),
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.ChatBubbleOutline,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(64.dp),
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                                Spacer(modifier = Modifier.height(16.dp))
+                                Text(
+                                    text = s.noSessions,
+                                    style = MaterialTheme.typography.titleMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                                Spacer(modifier = Modifier.height(8.dp))
+                                Text(
+                                    text = s.noSessionsHint,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                        }
+
+                        else -> {
+                            LazyColumn(
+                                contentPadding = PaddingValues(16.dp),
+                                verticalArrangement = Arrangement.spacedBy(8.dp),
+                            ) {
+                                items(
+                                    items = projectSessions,
+                                    key = { it.id }
+                                ) { session ->
+                                    SessionCard(
+                                        session = session,
+                                        onClick = { onSessionClick(session.id) },
+                                        onDelete = { viewModel.deleteSession(session.id, directory) },
+                                        onFork = { viewModel.forkSession(session.id, directory) },
+                                    )
+                                }
+                            }
+                        }
                     }
+
+                    ErrorSnackbar(
+                        error = uiState.error,
+                        onDismiss = viewModel::clearError,
+                    )
                 }
             }
+        }
 
-            ErrorSnackbar(
-                error = uiState.error,
-                onDismiss = viewModel::clearError,
-            )
+        // Memo panel — slides in from right edge
+        if (uiState.isMemoPanelOpen || memoPanelOffset < panelWidthDp) {
+            Box(
+                modifier = Modifier
+                    .align(Alignment.CenterEnd)
+                    .offset(x = memoPanelOffset)
+            ) {
+                MemoPanel(
+                    projectName = folderName,
+                    memos = uiState.memos,
+                    onAdd = { viewModel.addMemo(directory) },
+                    onUpdate = { viewModel.updateMemo(directory, it) },
+                    onDelete = { viewModel.deleteMemo(directory, it) },
+                    onClose = { viewModel.closeMemoPanel() },
+                )
+            }
         }
     }
 }

@@ -4,7 +4,9 @@ import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.opencode.remote.data.api.dto.SessionInfo
+import com.opencode.remote.data.api.dto.MemoEntry
 import com.opencode.remote.data.datastore.ConnectionPreferences
+import com.opencode.remote.data.datastore.MemoManager
 import com.opencode.remote.data.repository.OConnectorRepository
 import com.opencode.remote.ui.strings.AppLocale
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -25,7 +27,11 @@ data class SessionsUiState(
     val error: String? = null,
     /** project.worktree or project.id */
     val projectName: String? = null,
+    val currentServerName: String? = null,
     val hideChildSessions: Boolean = false,
+    // Memo panel
+    val isMemoPanelOpen: Boolean = false,
+    val memos: List<MemoEntry> = emptyList(),
 )
 
 @HiltViewModel
@@ -33,6 +39,7 @@ class SessionsViewModel @Inject constructor(
     private val repository: OConnectorRepository,
     private val prefs: ConnectionPreferences,
     private val sseEventBus: SseEventBus,
+    private val memoManager: MemoManager,
 ) : ViewModel() {
 
     private var allSessions: List<SessionInfo> = emptyList()
@@ -53,6 +60,7 @@ class SessionsViewModel @Inject constructor(
     init {
         loadSessions()
         loadProjectName()
+        loadCurrentServerName()
         observeDarkMode()
         observeHideChildSessions()
         subscribeToSseEvents()
@@ -128,6 +136,13 @@ class SessionsViewModel @Inject constructor(
         }
     }
 
+    private fun loadCurrentServerName() {
+        val name = repository.getCurrentServerName()
+        if (name != null) {
+            _uiState.update { it.copy(currentServerName = name) }
+        }
+    }
+
     fun createSession(directory: String? = null) {
         viewModelScope.launch {
             _uiState.update { it.copy(isCreating = true, error = null) }
@@ -174,6 +189,71 @@ class SessionsViewModel @Inject constructor(
 
     fun clearError() {
         _uiState.update { it.copy(error = null) }
+    }
+
+    // ─── Memo Panel ────────────────────────────────────────────────
+
+    fun setMemoPanelOpen(open: Boolean, directory: String) {
+        _uiState.update { it.copy(isMemoPanelOpen = open) }
+        if (open) {
+            loadMemos(directory)
+        }
+    }
+
+    fun closeMemoPanel() {
+        _uiState.update { it.copy(isMemoPanelOpen = false, memos = emptyList()) }
+    }
+
+    private fun loadMemos(directory: String) {
+        viewModelScope.launch {
+            try {
+                val memos = memoManager.loadMemos(directory)
+                _uiState.update { it.copy(memos = memos.sortedByDescending { m -> m.updatedAt }) }
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to load memos", e)
+            }
+        }
+    }
+
+    fun addMemo(directory: String) {
+        viewModelScope.launch {
+            val now = System.currentTimeMillis()
+            val entry = MemoEntry(
+                id = java.util.UUID.randomUUID().toString(),
+                directory = directory,
+                title = "",
+                content = "",
+                isDone = false,
+                createdAt = now,
+                updatedAt = now,
+            )
+            memoManager.addMemo(entry)
+            loadMemos(directory)
+        }
+    }
+
+    fun updateMemo(directory: String, memo: MemoEntry) {
+        viewModelScope.launch {
+            memoManager.updateMemo(memo.copy(updatedAt = System.currentTimeMillis()))
+            loadMemos(directory)
+        }
+    }
+
+    fun deleteMemo(directory: String, memoId: String) {
+        viewModelScope.launch {
+            memoManager.deleteMemo(memoId)
+            loadMemos(directory)
+        }
+    }
+
+    fun toggleMemoDone(directory: String, memo: MemoEntry) {
+        viewModelScope.launch {
+            memoManager.updateMemo(memo.copy(
+                isDone = !memo.isDone,
+                updatedAt = System.currentTimeMillis(),
+            ))
+            loadMemos(directory)
+        }
     }
 
     private fun subscribeToSseEvents() {
