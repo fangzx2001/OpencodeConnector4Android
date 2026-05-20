@@ -1,6 +1,6 @@
 #!/bin/bash
 # ================================================
-#  OConnector Server Startup Script (Linux/macOS)
+#  OC X ALPHA Server Startup Script (Linux/macOS)
 #  Starts OpenCode in server mode for remote access
 # ================================================
 
@@ -9,7 +9,7 @@ PORT="4096"
 
 echo ""
 echo "  ╔═══════════════════════════════════════════╗"
-echo "  ║     OConnector Server Launcher           ║"
+echo "  ║     OC X ALPHA Server Launcher          ║"
 echo "  ╚═══════════════════════════════════════════╝"
 echo ""
 

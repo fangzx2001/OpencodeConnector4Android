@@ -1,6 +1,6 @@
 @echo off
 :: ================================================
-::  OConnector Server Startup Script (Windows)
+::  OC X ALPHA Server Startup Script (Windows)
 ::  Starts OpenCode in server mode for remote access
 :: ================================================
 set HOST=0.0.0.0
@@ -10,7 +10,7 @@ set PORT=4096
 
 echo.
 echo   ╔═══════════════════════════════════════════╗
-echo   ║     OConnector Server Launcher            ║
+echo   ║     OC X ALPHA Server Launcher           ║
 echo   ╚═══════════════════════════════════════════╝
 echo.
 echo   [*] Starting OpenCode server...
