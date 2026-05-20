@@ -14,5 +14,5 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "OConnector"
+rootProject.name = "OC X ALPHA"
 include(":app")
