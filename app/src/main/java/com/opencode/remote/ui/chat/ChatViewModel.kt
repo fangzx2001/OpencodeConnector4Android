@@ -22,6 +22,14 @@ data class ResponseSegment(
     val text: String,
     val isStreaming: Boolean = false,  // true if still receiving content
     val id: String? = null,  // callID for tool segments, null for text/thinking — prevents tool calls from overwriting each other
+    val label: String? = null,
+    val status: String? = null,
+    val toolName: String? = null,
+    val childSessionId: String? = null,
+    val title: String? = null,
+    val stepTokens: MessageTokens? = null,
+    val stepCost: Double? = null,
+    val stepReason: String? = null,
 )
 
 data class ContextUsageState(
@@ -531,23 +539,39 @@ class ChatViewModel @Inject constructor(
                 val segType = when (part.type) {
                     "reasoning" -> "thinking"
                     "text" -> "text"
-                    "tool-invocation", "tool-call", "tool" -> "tool"
+                    "step-finish" -> "step-finish"
+                    "tool-invocation", "tool-call", "tool" -> if (part.tool == "task") "task" else "tool"
                     else -> return
                 }
 
-                // For tool parts: use tool name + state info if text is empty
-                val partText = if (part.type == "tool" && part.text.isNullOrBlank()) {
-                    ToolSummarizer.summarize(part)
+                val toolSummary = if (part.type == "tool") ToolSummarizer.summarizeDetailed(part) else null
+                val partText = if (part.type == "tool") {
+                    toolSummary?.detail ?: part.text ?: return
+                } else if (part.type == "step-finish") {
+                    summarizeStepFinish(part)
                 } else {
                     part.text ?: return
                 }
-                if (partText.isBlank()) return
+                if (partText.isBlank() && part.type != "step-finish") return
 
                 val callId = part.callID
                 Log.d(TAG, "part.updated type=${part.type} -> segType=$segType callId=${callId?.take(8)} msg=${partMessageId.take(8)}")
 
                 val segments = _uiState.value.streamingSegments
-                val updated = putSegment(segments, segType, partText, id = callId)
+                val updated = putSegment(
+                    segments = segments,
+                    type = segType,
+                    fullText = partText,
+                    id = callId,
+                    label = toolSummary?.label,
+                    status = toolSummary?.status,
+                    toolName = toolSummary?.toolName,
+                    childSessionId = toolSummary?.childSessionId,
+                    title = toolSummary?.title,
+                    stepTokens = part.tokens,
+                    stepCost = part.cost,
+                    stepReason = part.reason,
+                )
                 repository.setStreamingBlocks(updated)
                 _uiState.update {
                     it.copy(streaming = it.streaming.copy(isStreaming = true, isSending = false, streamingSegments = updated))
@@ -684,15 +708,54 @@ class ChatViewModel @Inject constructor(
 
     /** Update or create a segment with full text (from part.updated). Truncates if text exceeds limit.
      *  Matches by both type AND id to prevent tool calls from overwriting each other. */
-    private fun putSegment(segments: List<ResponseSegment>, type: String, fullText: String, id: String? = null): List<ResponseSegment> {
+    private fun putSegment(
+        segments: List<ResponseSegment>,
+        type: String,
+        fullText: String,
+        id: String? = null,
+        label: String? = null,
+        status: String? = null,
+        toolName: String? = null,
+        childSessionId: String? = null,
+        title: String? = null,
+        stepTokens: MessageTokens? = null,
+        stepCost: Double? = null,
+        stepReason: String? = null,
+    ): List<ResponseSegment> {
         val truncatedText = if (fullText.length > MAX_STREAMING_TEXT) {
             fullText.take(MAX_STREAMING_TEXT) + "\n\n… [truncated]"
         } else fullText
         val lastIdx = segments.indexOfLast { it.type == type && it.id == id }
         return if (lastIdx >= 0) {
-            segments.subList(0, lastIdx) + ResponseSegment(type, truncatedText, isStreaming = true, id = id) + segments.subList(lastIdx + 1, segments.size)
+            segments.subList(0, lastIdx) + ResponseSegment(
+                type = type,
+                text = truncatedText,
+                isStreaming = true,
+                id = id,
+                label = label,
+                status = status,
+                toolName = toolName,
+                childSessionId = childSessionId,
+                title = title,
+                stepTokens = stepTokens,
+                stepCost = stepCost,
+                stepReason = stepReason,
+            ) + segments.subList(lastIdx + 1, segments.size)
         } else {
-            segments + ResponseSegment(type = type, text = truncatedText, isStreaming = true, id = id)
+            segments + ResponseSegment(
+                type = type,
+                text = truncatedText,
+                isStreaming = true,
+                id = id,
+                label = label,
+                status = status,
+                toolName = toolName,
+                childSessionId = childSessionId,
+                title = title,
+                stepTokens = stepTokens,
+                stepCost = stepCost,
+                stepReason = stepReason,
+            )
         }
     }
 
