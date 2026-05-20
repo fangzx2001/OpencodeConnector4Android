@@ -19,7 +19,7 @@ class GitHubReleaseService @Inject constructor() {
     suspend fun checkLatestRelease(owner: String, repo: String): Result<GitHubRelease> {
         return try {
             val release = client.get("https://api.github.com/repos/$owner/$repo/releases/latest") {
-                header(HttpHeaders.UserAgent, "OConnector")
+                header(HttpHeaders.UserAgent, "OC-X-ALPHA")
                 header(HttpHeaders.Accept, "application/vnd.github+json")
             }.body<GitHubRelease>()
             Result.success(release)
