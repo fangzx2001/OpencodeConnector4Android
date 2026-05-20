@@ -1,6 +1,6 @@
 [English](README.md) | 中文
 
-# OConnector
+# OC X ALPHA
 
 连接 [OpenCode](https://opencode.ai) AI 编程助手的 Android 客户端。在手机上与 AI 对话、管理所有项目的会话、追踪任务进度。
 
@@ -33,7 +33,7 @@
 1. 前往 [GitHub Releases](https://github.com/fangzx2001/OpencodeConnector4Android/releases/latest)
 2. 下载最新版本中的 `app-release.apk`
 3. 在手机上打开下载的文件，允许「安装未知来源应用」
-4. 安装完成后打开 OConnector，连接你的 PC
+4. 安装完成后打开 OC X ALPHA，连接你的 PC
 
 > 最低系统要求：Android 8.0+ (API 26)
 
@@ -71,7 +71,7 @@ bash scripts/start-server.sh   # macOS / Linux
 opencode serve --hostname=0.0.0.0 --port=4096
 ```
 
-从任意目录启动即可，OConnector 会自动发现所有项目。
+从任意目录启动即可，OC X ALPHA 会自动发现所有项目。
 
 ### 网络配置
 
@@ -87,7 +87,7 @@ opencode serve --hostname=0.0.0.0 --port=4096
 
 ### 使用方法
 
-1. 打开 OConnector → 输入 PC 的 IP 和端口 → 点击 **连接**
+1. 打开 OC X ALPHA → 输入 PC 的 IP 和端口 → 点击 **连接**
 2. 会话列表自动展示 PC 上所有项目的会话
 3. 点击项目查看其会话，点击会话进入聊天
 4. 点击顶部眼睛按钮，可切换隐藏/显示子会话
@@ -141,7 +141,7 @@ app/src/main/java/com/opencode/remote/
 
 ### 看不到所有项目？
 
-OConnector 会自动发现所有项目。请确保服务器正在运行且手机可以访问。检查服务器控制台是否有错误。
+OC X ALPHA 会自动发现所有项目。请确保服务器正在运行且手机可以访问。检查服务器控制台是否有错误。
 
 ### 某个项目下没有会话？
 

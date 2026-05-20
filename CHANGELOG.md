@@ -1,12 +1,12 @@
 # Changelog
 
-All notable changes to OConnector will be documented in this file.
+All notable changes to OC X ALPHA will be documented in this file.
 
 ## [1.1.2] - 2026-05-07
 
 ### Added
 
-- **Background SSE stability** — foreground service with `dataSync` type keeps the SSE connection alive when the app is in the background. A persistent notification ("OConnector is running") is displayed to comply with Android 14+ requirements.
+- **Background SSE stability** — foreground service with `dataSync` type keeps the SSE connection alive when the app is in the background. A persistent notification ("OC X ALPHA is running") is displayed to comply with Android 14+ requirements.
 - **In-app update check** — the app automatically checks GitHub Releases for new versions when you open the connection page. If an update is available, a download icon (⬇) appears next to the language button.
 - **Update dialog** — tapping the download icon shows the changelog and a download button. The APK is downloaded via DownloadManager and installed through the system installer.
 - **Help page: "Check for Updates"** section added (EN/ZH).

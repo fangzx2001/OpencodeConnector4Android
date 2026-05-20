@@ -1,6 +1,6 @@
 English | [中文](README_zh.md)
 
-# OConnector
+# OC X ALPHA
 
 An Android client for the [OpenCode](https://opencode.ai) AI coding assistant. Connect to your PC, chat with AI, manage sessions across all projects, and track task progress — all from your phone.
 
@@ -33,7 +33,7 @@ An Android client for the [OpenCode](https://opencode.ai) AI coding assistant. C
 1. Go to [GitHub Releases](https://github.com/fangzx2001/OpencodeConnector4Android/releases/latest)
 2. Download `app-release.apk` from the latest release
 3. Open the file on your phone, allow "Install from unknown sources"
-4. Open OConnector and connect to your PC
+4. Open OC X ALPHA and connect to your PC
 
 > Requires Android 8.0+ (API 26)
 
@@ -71,7 +71,7 @@ bash scripts/start-server.sh   # macOS / Linux
 opencode serve --hostname=0.0.0.0 --port=4096
 ```
 
-You can start the server from any directory — OConnector will discover all projects automatically.
+You can start the server from any directory — OC X ALPHA will discover all projects automatically.
 
 ### Network Setup
 
@@ -87,7 +87,7 @@ You can start the server from any directory — OConnector will discover all pro
 
 ### Usage
 
-1. Open OConnector → enter PC IP and port → tap **Connect**
+1. Open OC X ALPHA → enter PC IP and port → tap **Connect**
 2. The session list shows all projects and sessions across your PC
 3. Tap a project to see its sessions, tap a session to enter chat
 4. Tap the eye icon in the top bar to hide or show child sessions
@@ -141,7 +141,7 @@ app/src/main/java/com/opencode/remote/
 
 ### Can't see all projects?
 
-OConnector auto-discovers all projects. Make sure the server is running and the phone can reach it. Check the server console for errors.
+OC X ALPHA auto-discovers all projects. Make sure the server is running and the phone can reach it. Check the server console for errors.
 
 ### Session list is empty for a project?
 
