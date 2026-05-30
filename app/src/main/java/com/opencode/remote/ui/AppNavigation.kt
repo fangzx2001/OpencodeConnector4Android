@@ -1,6 +1,7 @@
 package com.opencode.remote.ui
 
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
@@ -64,10 +65,12 @@ fun OConnectorApp() {
             val directory = java.net.URLDecoder.decode(encoded, "UTF-8")
             // Share the same SessionsViewModel with SessionsScreen so session count updates are visible immediately
             // Use try-catch to handle deep link scenarios where SESSIONS route is not in the back stack
-            val sessionsEntry = try {
-                navController.getBackStackEntry(Routes.SESSIONS)
-            } catch (_: IllegalArgumentException) {
-                backStackEntry
+            val sessionsEntry = remember(backStackEntry) {
+                try {
+                    navController.getBackStackEntry(Routes.SESSIONS)
+                } catch (_: IllegalArgumentException) {
+                    backStackEntry
+                }
             }
             ProjectSessionsScreen(
                 directory = directory,

@@ -532,6 +532,43 @@ class OConnectorApiClient @Inject constructor(
     private fun parseStringList(element: JsonElement?): List<String> =
         (element as? JsonArray)?.mapNotNull { it.jsonPrimitive.contentOrNull }.orEmpty()
 
+    // ─── Files ──────────────────────────────────────────────────────────
+
+    suspend fun listFiles(path: String, directory: String? = null): List<FileNode> =
+        client.get("/file") {
+            parameter("path", path)
+            directory?.let { parameter("directory", it); header("x-opencode-directory", encDir(it)) }
+        }.body()
+
+    suspend fun readFileContent(path: String, directory: String? = null): FileContent =
+        client.get("/file/content") {
+            parameter("path", path)
+            directory?.let { parameter("directory", it); header("x-opencode-directory", encDir(it)) }
+        }.body()
+
+    // ─── Permission / Question ──────────────────────────────────────────
+
+    suspend fun replyPermission(requestId: String, reply: String, message: String? = null, directory: String? = null) {
+        client.post("/permission/$requestId/reply") {
+            setBody(PermissionReplyPayload(reply, message))
+            directory?.let { parameter("directory", it); header("x-opencode-directory", encDir(it)) }
+        }
+    }
+
+    suspend fun replyQuestion(requestId: String, answers: List<List<String>>, directory: String? = null) {
+        client.post("/question/$requestId/reply") {
+            setBody(QuestionReplyPayload(answers))
+            directory?.let { parameter("directory", it); header("x-opencode-directory", encDir(it)) }
+        }
+    }
+
+    suspend fun rejectQuestion(requestId: String, directory: String? = null) {
+        client.post("/question/$requestId/reject") {
+            setBody("{}")
+            directory?.let { parameter("directory", it); header("x-opencode-directory", encDir(it)) }
+        }
+    }
+
     fun close() {
         try { client.close() } catch (_: Exception) {}
     }

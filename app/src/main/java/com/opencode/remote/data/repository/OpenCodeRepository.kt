@@ -81,6 +81,13 @@ interface OConnectorRepository {
     fun getCachedProviderDefaults(): Map<String, String>
     fun getCachedConnectedProviderIds(): List<String>
 
+    suspend fun listFiles(path: String, directory: String? = null): List<FileNode>
+    suspend fun readFileContent(path: String, directory: String? = null): FileContent
+
+    suspend fun replyPermission(requestId: String, reply: String, message: String? = null, directory: String? = null)
+    suspend fun replyQuestion(requestId: String, answers: List<List<String>>, directory: String? = null)
+    suspend fun rejectQuestion(requestId: String, directory: String? = null)
+
     // ─── SSE Events ──────────────────────────────────────────────────
 
     fun subscribeToEvents(): Flow<ServerEvent>
@@ -230,6 +237,21 @@ class OConnectorRepositoryImpl @Inject constructor(
 
     /** Get cached agents (returns empty list if not loaded yet) */
     override fun getCachedAgents(): List<AgentInfo> = cachedAgents ?: emptyList()
+
+    override suspend fun listFiles(path: String, directory: String?): List<FileNode> =
+        requireClient().listFiles(path, directory)
+
+    override suspend fun readFileContent(path: String, directory: String?): FileContent =
+        requireClient().readFileContent(path, directory)
+
+    override suspend fun replyPermission(requestId: String, reply: String, message: String?, directory: String?) =
+        requireClient().replyPermission(requestId, reply, message, directory)
+
+    override suspend fun replyQuestion(requestId: String, answers: List<List<String>>, directory: String?) =
+        requireClient().replyQuestion(requestId, answers, directory)
+
+    override suspend fun rejectQuestion(requestId: String, directory: String?) =
+        requireClient().rejectQuestion(requestId, directory)
 
     override suspend fun listProviders(): List<ProviderInfo> {
         cachedProviders?.let { return it }

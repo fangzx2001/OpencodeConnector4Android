@@ -1,5 +1,10 @@
+@file:Suppress("DEPRECATION")
 package com.opencode.remote.ui.chat
 
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
+import android.widget.Toast
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.InfiniteTransition
 import androidx.compose.animation.core.LinearEasing
@@ -11,6 +16,8 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -37,7 +44,7 @@ import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
-import androidx.compose.material.icons.filled.Hub
+import androidx.compose.material.icons.filled.GTranslate
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Psychology
 import androidx.compose.material.icons.filled.Send
@@ -55,6 +62,8 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -66,10 +75,25 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.platform.LocalContext
 import com.opencode.remote.data.api.dto.MessageInfo
 import com.opencode.remote.data.api.dto.MessagePart
 import com.opencode.remote.data.api.dto.MessageTokens
 import com.opencode.remote.ui.strings.AppLocale
+import io.ktor.client.HttpClient
+import io.ktor.client.call.body
+import io.ktor.client.engine.okhttp.OkHttp
+import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
+import io.ktor.client.request.parameter
+import io.ktor.client.request.post
+import io.ktor.http.ContentType
+import io.ktor.http.contentType
+import io.ktor.serialization.kotlinx.json.json
+import kotlinx.coroutines.launch
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonPrimitive
 
 // ─── Message Segment Parsing ─────────────────────────────────────────────
 
@@ -108,6 +132,9 @@ internal fun parseMessageSegments(message: MessageInfo): List<ResponseSegment> {
                 stepTokens = part.tokens,
                 stepCost = part.cost,
                 stepReason = part.reason,
+                inputText = toolSummary?.inputText,
+                outputText = toolSummary?.outputText,
+                metadataText = toolSummary?.metadataText,
             )
         }
 }
@@ -159,7 +186,7 @@ internal fun summarizeStepFinish(part: MessagePart): String {
     part.reason?.takeIf { it.isNotBlank() }?.let { bits += "${s.stepReasonLabel}: $it" }
     part.tokens?.let { bits += "${s.stepTokensLabel}: ${formatTokenCount(it)}" }
     part.cost?.let { bits += "${s.stepCostLabel}: ${"%.4f".format(it)}" }
-    return bits.joinToString("\n")
+    return bits.joinToString("  ·  ")
 }
 
 private fun formatTokenCount(tokens: MessageTokens): String {
@@ -241,6 +268,109 @@ private fun String?.toToolSummaryCategory(strings: com.opencode.remote.ui.string
     }
 }
 
+private data class DetailSection(
+    val label: String,
+    val text: String,
+)
+
+private fun buildDetailSections(segment: ResponseSegment, strings: com.opencode.remote.ui.strings.AppStrings): List<DetailSection> {
+    val sections = mutableListOf<DetailSection>()
+    val executionText = buildList {
+        segment.title?.takeIf { it.isNotBlank() }?.let { add(it) }
+        if (segment.inputText.isNullOrBlank() && segment.outputText.isNullOrBlank() && segment.metadataText.isNullOrBlank()) {
+            segment.text.takeIf { it.isNotBlank() }?.let { add(it) }
+        }
+        segment.childSessionId?.takeIf { it.isNotBlank() }?.let { add("${strings.childSessionLabel}: $it") }
+    }.joinToString("\n\n")
+
+    executionText.takeIf { it.isNotBlank() }?.let {
+        sections += DetailSection(strings.stepExecutionLabel, it)
+    }
+    segment.inputText?.takeIf { it.isNotBlank() }?.let {
+        sections += DetailSection(strings.stepInputLabel, it)
+    }
+    segment.outputText?.takeIf { it.isNotBlank() }?.let {
+        sections += DetailSection(strings.stepOutputLabel, it)
+    }
+    segment.metadataText?.takeIf { it.isNotBlank() }?.let {
+        sections += DetailSection(strings.stepMetadataLabel, it)
+    }
+    return sections
+}
+
+private fun copyRawFields(context: Context, label: String, content: String, copiedMessage: String) {
+    val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+    clipboard.setPrimaryClip(ClipData.newPlainText(label, content))
+    Toast.makeText(context, copiedMessage, Toast.LENGTH_SHORT).show()
+}
+
+private fun buildSegmentRawFields(segment: ResponseSegment): String {
+    return buildString {
+        appendLine("type: ${segment.type}")
+        appendLine("id: ${segment.id.orEmpty()}")
+        appendLine("label: ${segment.label.orEmpty()}")
+        appendLine("status: ${segment.status.orEmpty()}")
+        appendLine("toolName: ${segment.toolName.orEmpty()}")
+        appendLine("title: ${segment.title.orEmpty()}")
+        appendLine("childSessionId: ${segment.childSessionId.orEmpty()}")
+        appendLine("stepReason: ${segment.stepReason.orEmpty()}")
+        appendLine("stepTokens: ${segment.stepTokens?.toString().orEmpty()}")
+        appendLine("stepCost: ${segment.stepCost?.toString().orEmpty()}")
+        appendLine("inputText:")
+        appendLine(segment.inputText.orEmpty())
+        appendLine("outputText:")
+        appendLine(segment.outputText.orEmpty())
+        appendLine("metadataText:")
+        appendLine(segment.metadataText.orEmpty())
+        appendLine("text:")
+        append(segment.text)
+    }.trimEnd()
+}
+
+private fun buildGroupRawFields(segments: List<ResponseSegment>, stepSegment: ResponseSegment?): String {
+    return buildString {
+        appendLine("groupSegmentCount: ${segments.size}")
+        segments.forEachIndexed { index, segment ->
+            appendLine()
+            appendLine("segment[$index]")
+            appendLine(buildSegmentRawFields(segment))
+        }
+        if (stepSegment != null) {
+            appendLine()
+            appendLine("stepFinish")
+            append(buildSegmentRawFields(stepSegment))
+        }
+    }.trimEnd()
+}
+
+private object ThinkingTranslationClient {
+    private val json = Json { ignoreUnknownKeys = true; isLenient = true }
+    private val client = HttpClient(OkHttp) {
+        install(ContentNegotiation) { json(json) }
+    }
+
+    suspend fun translateToZh(text: String): String {
+        val response: JsonElement = client.post("https://translate.googleapis.com/translate_a/single") {
+            parameter("client", "gtx")
+            parameter("sl", "auto")
+            parameter("tl", "zh-CN")
+            parameter("dt", "t")
+            parameter("q", text)
+            contentType(ContentType.Application.Json)
+        }.body()
+        return extractTranslation(response)
+    }
+
+    private fun extractTranslation(element: JsonElement): String {
+        val top = element as? JsonArray ?: return ""
+        val lines = top.firstOrNull() as? JsonArray ?: return ""
+        return lines.mapNotNull { row ->
+            val arr = row as? JsonArray ?: return@mapNotNull null
+            (arr.firstOrNull() as? JsonPrimitive)?.content
+        }.joinToString("")
+    }
+}
+
 // ─── User Message Item ────────────────────────────────────────────────────
 
 @Composable
@@ -278,9 +408,12 @@ internal fun UserMessageItem(message: MessageInfo) {
 
 @Composable
 internal fun AiResponsePanel(
+    messageKey: String,
     agentName: String,
     segments: List<ResponseSegment>,
     isStreaming: Boolean,
+    expanded: Boolean,
+    onExpandedChange: (Boolean) -> Unit,
 ) {
     val s = AppLocale.strings
     val renderItems = remember(segments) { groupSegmentsForRender(segments) }
@@ -312,36 +445,76 @@ internal fun AiResponsePanel(
                     style = MaterialTheme.typography.labelMedium,
                     fontWeight = FontWeight.Bold,
                     color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.weight(1f),
+                )
+                StatusBadge(
+                    status = if (isStreaming) s.statusRunning else s.statusCompleted,
+                    contentColor = MaterialTheme.colorScheme.primary,
+                )
+                Spacer(Modifier.width(6.dp))
+                Icon(
+                    imageVector = if (expanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                    contentDescription = if (expanded) s.collapse else s.expand,
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier
+                        .size(18.dp)
+                        .clickable { onExpandedChange(!expanded) },
                 )
             }
-            Spacer(Modifier.height(10.dp))
 
-            renderItems.forEachIndexed { idx, item ->
-                val isLastItem = idx == renderItems.lastIndex
-                when {
-                    item.textSegment?.type == "thinking" -> {
-                        val segment = item.textSegment
-                        val isActive = segment?.isStreaming == true && isLastItem && isStreaming
-                        StatusSegmentCard(
-                            text = segment?.text.orEmpty(),
-                            isStreaming = isActive,
-                            label = if (isActive) s.thinkingActive else s.thought,
-                            icon = Icons.Default.Psychology,
-                            status = if (isActive) s.statusRunning else s.statusCompleted,
-                            category = s.reasoningLabel,
-                            containerColor = MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.5f),
-                            contentColor = MaterialTheme.colorScheme.onTertiaryContainer,
-                        )
+            val summaryLine = remember(renderItems) {
+                buildList {
+                    val thinkingCount = renderItems.count { it.textSegment?.type == "thinking" }
+                    val stepCount = renderItems.sumOf { it.toolSegments.size }
+                    val outputCount = renderItems.count { it.textSegment?.type == "text" }
+                    if (thinkingCount > 0) add("${s.reasoningLabel} ×$thinkingCount")
+                    if (stepCount > 0) add("${s.toolActivityLabel} ×$stepCount")
+                    if (outputCount > 0) add("Output ×$outputCount")
+                }.joinToString("  ·  ")
+            }
+
+            if (summaryLine.isNotBlank()) {
+                Spacer(Modifier.height(6.dp))
+                Text(
+                    text = summaryLine,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+
+            AnimatedVisibility(visible = expanded) {
+                Column {
+                    Spacer(Modifier.height(10.dp))
+                    renderItems.forEachIndexed { idx, item ->
+                        val isLastItem = idx == renderItems.lastIndex
+                        when {
+                            item.textSegment?.type == "thinking" -> {
+                                val segment = item.textSegment
+                                val isActive = segment.isStreaming && isLastItem && isStreaming
+                                ThinkingSegmentCard(
+                                    text = segment.text,
+                                    isStreaming = isActive,
+                                    label = if (isActive) s.thinkingActive else s.thought,
+                                    icon = Icons.Default.Psychology,
+                                    status = if (isActive) s.statusRunning else s.statusCompleted,
+                                    category = s.reasoningLabel,
+                                    containerColor = MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.5f),
+                                    contentColor = MaterialTheme.colorScheme.onTertiaryContainer,
+                                )
+                            }
+                            item.textSegment?.type == "step-finish" -> StepFinishCard(item.textSegment)
+                            item.toolSegments.isEmpty() && item.stepSegment != null -> StepFinishCard(item.stepSegment)
+                            item.textSegment != null -> MessageTextBubble(item.textSegment.text)
+                            else -> ToolStepGroupCard(
+                                groupKey = "$messageKey-group-$idx-${item.toolSegments.firstOrNull()?.id.orEmpty()}",
+                                segments = item.toolSegments,
+                                stepSegment = item.stepSegment,
+                                isStreaming = isStreaming && isLastItem,
+                            )
+                        }
+                        if (!isLastItem) Spacer(Modifier.height(6.dp))
                     }
-                    item.textSegment?.type == "step-finish" -> StepFinishCard(item.textSegment)
-                    item.textSegment != null -> MessageTextBubble(item.textSegment.text)
-                    else -> ToolStepGroupCard(
-                        segments = item.toolSegments,
-                        stepSegment = item.stepSegment,
-                        isStreaming = isStreaming && isLastItem,
-                    )
                 }
-                if (!isLastItem) Spacer(Modifier.height(6.dp))
             }
 
             if (isStreaming) {
@@ -365,12 +538,22 @@ internal fun AiResponsePanel(
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun MessageTextBubble(text: String) {
+    val context = LocalContext.current
+    val s = AppLocale.strings
     Surface(
         shape = RoundedCornerShape(16.dp),
         color = MaterialTheme.colorScheme.surface,
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier
+            .fillMaxWidth()
+            .combinedClickable(
+                onClick = {},
+                onLongClick = {
+                    copyRawFields(context, "message-text", text, s.rawFieldsCopied)
+                },
+            ),
     ) {
         Column(modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp)) {
             MarkdownText(text = text, color = MaterialTheme.colorScheme.onSurface)
@@ -379,11 +562,155 @@ private fun MessageTextBubble(text: String) {
 }
 
 @Composable
+private fun ThinkingSegmentCard(
+    text: String,
+    isStreaming: Boolean,
+    label: String,
+    icon: ImageVector,
+    status: String,
+    category: String,
+    containerColor: Color,
+    contentColor: Color,
+) {
+    val context = LocalContext.current
+    val s = AppLocale.strings
+    val scope = rememberCoroutineScope()
+    var expanded by remember(isStreaming) { mutableStateOf(isStreaming) }
+    var translatedText by remember(text) { mutableStateOf<String?>(null) }
+    var isTranslating by remember(text) { mutableStateOf(false) }
+
+    Surface(
+        shape = RoundedCornerShape(10.dp),
+        color = containerColor,
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Column {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { expanded = !expanded }
+                    .padding(horizontal = 10.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                if (isStreaming) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(14.dp),
+                        strokeWidth = 2.dp,
+                        color = contentColor,
+                    )
+                } else {
+                    Icon(
+                        imageVector = icon,
+                        contentDescription = null,
+                        modifier = Modifier.size(16.dp),
+                        tint = contentColor,
+                    )
+                }
+                Spacer(Modifier.width(8.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = category,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = contentColor.copy(alpha = 0.78f),
+                    )
+                    Text(
+                        text = label,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = contentColor,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+                IconButton(
+                    onClick = {
+                        if (translatedText != null) {
+                            translatedText = null
+                            return@IconButton
+                        }
+                        if (isTranslating || text.isBlank()) return@IconButton
+                        isTranslating = true
+                        scope.launch {
+                            try {
+                                translatedText = ThinkingTranslationClient.translateToZh(text).takeIf { it.isNotBlank() }
+                                    ?: translatedText
+                            } catch (_: Exception) {
+                                Toast.makeText(context, s.translateFailed, Toast.LENGTH_SHORT).show()
+                            } finally {
+                                isTranslating = false
+                            }
+                        }
+                    },
+                    modifier = Modifier.size(28.dp),
+                ) {
+                    if (isTranslating) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(14.dp),
+                            strokeWidth = 2.dp,
+                            color = contentColor,
+                        )
+                    } else {
+                        Icon(
+                            imageVector = Icons.Default.GTranslate,
+                            contentDescription = if (translatedText == null) "Translate" else "Restore",
+                            modifier = Modifier.size(16.dp),
+                            tint = if (translatedText == null) contentColor else MaterialTheme.colorScheme.primary,
+                        )
+                    }
+                }
+                StatusBadge(status = status, contentColor = contentColor)
+                Spacer(Modifier.width(6.dp))
+                Icon(
+                    imageVector = if (expanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                    contentDescription = if (expanded) s.collapse else s.expand,
+                    modifier = Modifier.size(18.dp),
+                    tint = contentColor.copy(alpha = 0.6f),
+                )
+            }
+
+            AnimatedVisibility(visible = expanded) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(start = 10.dp, end = 10.dp, bottom = 10.dp),
+                ) {
+                    HorizontalDivider(color = contentColor.copy(alpha = 0.18f))
+                    Spacer(Modifier.height(8.dp))
+                    Surface(
+                        shape = RoundedCornerShape(8.dp),
+                        color = containerColor.copy(alpha = 0.68f),
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .horizontalScroll(rememberScrollState())
+                                .padding(10.dp),
+                        ) {
+                            SelectionContainer {
+                                Text(
+                                    text = translatedText ?: text,
+                                    fontFamily = FontFamily.Monospace,
+                                    fontSize = 12.sp,
+                                    lineHeight = 16.sp,
+                                    color = contentColor,
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
 private fun ToolStepGroupCard(
+    groupKey: String,
     segments: List<ResponseSegment>,
     stepSegment: ResponseSegment?,
     isStreaming: Boolean,
 ) {
+    val context = LocalContext.current
     val s = AppLocale.strings
     val doneCount = segments.count {
         !it.status.equals("error", ignoreCase = true) &&
@@ -400,7 +727,7 @@ private fun ToolStepGroupCard(
     }
     val headerSummary = remember(segments) { buildToolStepsSummary(segments, s) }
     val collapsedTokenPreview = stepSegment?.stepTokens?.let { formatTokenCount(it) }
-    var expanded by remember(isStreaming, segments.size) { mutableStateOf(isStreaming || segments.size <= 1) }
+    var expanded by rememberSaveable(groupKey) { mutableStateOf(isStreaming || segments.size <= 1) }
 
     Surface(
         shape = RoundedCornerShape(16.dp),
@@ -409,7 +736,17 @@ private fun ToolStepGroupCard(
     ) {
         Column(modifier = Modifier.padding(10.dp)) {
             Row(
-                modifier = Modifier.fillMaxWidth().clickable { expanded = !expanded },
+                modifier = Modifier.fillMaxWidth().combinedClickable(
+                    onClick = { expanded = !expanded },
+                    onLongClick = {
+                        copyRawFields(
+                            context = context,
+                            label = "tool-step-group",
+                            content = buildGroupRawFields(segments, stepSegment),
+                            copiedMessage = s.rawFieldsCopied,
+                        )
+                    },
+                ),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Surface(
@@ -484,7 +821,12 @@ private fun ToolStepGroupCard(
             AnimatedVisibility(visible = expanded) {
                 Column(modifier = Modifier.padding(top = 10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     segments.forEachIndexed { index, segment ->
-                        ToolExecutionStepRow(index = index + 1, segment = segment, isActive = isStreaming && index == segments.lastIndex)
+                        ToolExecutionStepRow(
+                            stepKey = "$groupKey-step-${segment.id ?: index}",
+                            index = index + 1,
+                            segment = segment,
+                            isActive = isStreaming && index == segments.lastIndex,
+                        )
                     }
                 }
             }
@@ -498,9 +840,12 @@ private fun ToolStepGroupCard(
 }
 
 @Composable
-private fun ToolExecutionStepRow(index: Int, segment: ResponseSegment, isActive: Boolean) {
+private fun ToolExecutionStepRow(stepKey: String, index: Int, segment: ResponseSegment, isActive: Boolean) {
+    val s = AppLocale.strings
     val contentColor = MaterialTheme.colorScheme.onSecondaryContainer
     val failed = segment.status.equals("error", ignoreCase = true) || segment.status.equals("failed", ignoreCase = true)
+    val detailSections = remember(segment) { buildDetailSections(segment, s) }
+    var expanded by rememberSaveable(stepKey) { mutableStateOf(isActive || detailSections.size <= 1) }
     Surface(
         shape = RoundedCornerShape(14.dp),
         color = if (failed) MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.35f) else MaterialTheme.colorScheme.surface.copy(alpha = 0.88f),
@@ -540,20 +885,269 @@ private fun ToolExecutionStepRow(index: Int, segment: ResponseSegment, isActive:
                 )
                 Spacer(Modifier.width(8.dp))
                 StatusBadge(status = segment.status.toDisplayStatus(AppLocale.strings, isActive), contentColor = contentColor)
+                Spacer(Modifier.width(6.dp))
+                Icon(
+                    imageVector = if (expanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                    contentDescription = if (expanded) s.collapse else s.expand,
+                    modifier = Modifier
+                        .size(18.dp)
+                        .clickable { expanded = !expanded },
+                    tint = contentColor.copy(alpha = 0.72f),
+                )
             }
-            Spacer(Modifier.height(8.dp))
-            MarkdownText(text = segment.text, color = MaterialTheme.colorScheme.onSurface)
+            AnimatedVisibility(visible = expanded) {
+                Column {
+                    if (detailSections.isNotEmpty()) {
+                        Spacer(Modifier.height(8.dp))
+                    }
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        detailSections.forEach { section ->
+                            DetailSectionCard(
+                                sectionKey = "$stepKey-${section.label}",
+                                label = section.label,
+                                text = section.text,
+                                accentColor = if (failed) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.secondary,
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun DetailSectionCard(
+    sectionKey: String,
+    label: String,
+    text: String,
+    accentColor: Color,
+) {
+    val context = LocalContext.current
+    val s = AppLocale.strings
+    var expanded by rememberSaveable(sectionKey) { mutableStateOf(label == s.stepExecutionLabel) }
+    Surface(
+        shape = RoundedCornerShape(12.dp),
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f),
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Column(modifier = Modifier.padding(10.dp)) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .combinedClickable(
+                        onClick = { expanded = !expanded },
+                        onLongClick = {
+                            copyRawFields(
+                                context = context,
+                                label = "tool-section-$label",
+                                content = text,
+                                copiedMessage = s.rawFieldsCopied,
+                            )
+                        },
+                    ),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = label,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = accentColor,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.weight(1f),
+                )
+                Icon(
+                    imageVector = if (expanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                    contentDescription = if (expanded) s.collapse else s.expand,
+                    tint = accentColor,
+                    modifier = Modifier.size(16.dp),
+                )
+            }
+            AnimatedVisibility(visible = expanded) {
+                Column {
+                    Spacer(Modifier.height(6.dp))
+                    FormattedToolContent(
+                        label = label,
+                        text = text,
+                        accentColor = accentColor,
+                    )
+                }
+            }
+        }
+    }
+}
+
+private data class KeyValueLine(
+    val key: String,
+    val value: String,
+)
+
+private fun parseKeyValueLines(text: String): List<KeyValueLine> {
+    return text.lines()
+        .mapNotNull { line ->
+            val idx = line.indexOf(':')
+            if (idx <= 0 || idx == line.lastIndex) return@mapNotNull null
+            val key = line.substring(0, idx).trim()
+            val value = line.substring(idx + 1).trim()
+            if (key.isBlank() || value.isBlank()) null else KeyValueLine(key, value)
+        }
+}
+
+private fun looksLikeShellCommand(text: String): Boolean {
+    val single = text.trim()
+    if (single.isBlank()) return false
+    val prefixes = listOf(
+        "git ", "npm ", "pnpm ", "yarn ", "bun ", "python ", "python3 ", "pip ", "pip3 ",
+        "bash ", "sh ", "adb ", "gradlew", "./gradlew", "ls ", "cp ", "mv ", "rm ", "mkdir ",
+        "cat ", "curl ", "wget ", "gh ", "java ", "javac ", "node ", "npx ", "go ", "cargo ",
+        "kubectl ", "docker ", "fastboot ", "opencode ", "cd "
+    )
+    return prefixes.any { single.startsWith(it) }
+}
+
+private fun looksLikeCodeBlock(text: String): Boolean {
+    val trimmed = text.trim()
+    return trimmed.startsWith("```") ||
+        trimmed.contains("\nfun ") ||
+        trimmed.contains("\nclass ") ||
+        trimmed.contains("\nif (") ||
+        trimmed.contains("\n{") ||
+        trimmed.contains("</") ||
+        trimmed.contains("import ")
+}
+
+@Composable
+private fun FormattedToolContent(
+    label: String,
+    text: String,
+    accentColor: Color,
+) {
+    val s = AppLocale.strings
+    val keyValues = remember(text) { parseKeyValueLines(text) }
+    when {
+        keyValues.isNotEmpty() && keyValues.size == text.lines().count { it.isNotBlank() } -> {
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                keyValues.forEach { item ->
+                    KeyValueRow(item = item, accentColor = accentColor)
+                }
+            }
+        }
+        label == s.stepOutputLabel && looksLikeShellCommand(text) -> {
+            CodeLikeBlock(text = text, accentColor = accentColor, language = "shell")
+        }
+        label == s.stepExecutionLabel && looksLikeShellCommand(text.lineSequence().lastOrNull().orEmpty()) -> {
+            MarkdownText(text = text, color = MaterialTheme.colorScheme.onSurface)
+        }
+        looksLikeCodeBlock(text) -> {
+            val normalized = if (text.trimStart().startsWith("```")) text else "```\n$text\n```"
+            MarkdownText(text = normalized, color = MaterialTheme.colorScheme.onSurface)
+        }
+        else -> {
+            MarkdownText(text = text, color = MaterialTheme.colorScheme.onSurface)
         }
     }
 }
 
 @Composable
+private fun KeyValueRow(
+    item: KeyValueLine,
+    accentColor: Color,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.Top,
+    ) {
+        Text(
+            text = item.key,
+            style = MaterialTheme.typography.labelSmall,
+            color = accentColor,
+            fontWeight = FontWeight.SemiBold,
+            modifier = Modifier.width(72.dp),
+        )
+        if (looksLikeShellCommand(item.value)) {
+            CodeLikeBlock(
+                text = item.value,
+                accentColor = accentColor,
+                language = "shell",
+                modifier = Modifier.weight(1f),
+            )
+        } else if (looksLikeCodeBlock(item.value)) {
+            CodeLikeBlock(
+                text = item.value,
+                accentColor = accentColor,
+                language = null,
+                modifier = Modifier.weight(1f),
+            )
+        } else {
+            Text(
+                text = item.value,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurface,
+                modifier = Modifier.weight(1f),
+            )
+        }
+    }
+}
+
+@Composable
+private fun CodeLikeBlock(
+    text: String,
+    accentColor: Color,
+    language: String?,
+    modifier: Modifier = Modifier,
+) {
+    Surface(
+        shape = RoundedCornerShape(10.dp),
+        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.9f),
+        modifier = modifier,
+    ) {
+        Column(modifier = Modifier.padding(8.dp)) {
+            language?.takeIf { it.isNotBlank() }?.let {
+                Text(
+                    text = it,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = accentColor,
+                    fontFamily = FontFamily.Monospace,
+                )
+                Spacer(Modifier.height(4.dp))
+            }
+            Box(modifier = Modifier.horizontalScroll(rememberScrollState())) {
+                SelectionContainer {
+                    Text(
+                        text = text,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        fontFamily = FontFamily.Monospace,
+                        fontSize = 12.sp,
+                        lineHeight = 17.sp,
+                    )
+                }
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
 private fun StepFinishCard(segment: ResponseSegment) {
+    val context = LocalContext.current
     val s = AppLocale.strings
     Surface(
         shape = RoundedCornerShape(14.dp),
         color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.42f),
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier
+            .fillMaxWidth()
+            .combinedClickable(
+                onClick = {},
+                onLongClick = {
+                    copyRawFields(
+                        context = context,
+                        label = "step-finish",
+                        content = buildSegmentRawFields(segment),
+                        copiedMessage = s.rawFieldsCopied,
+                    )
+                },
+            ),
     ) {
         Column(modifier = Modifier.padding(10.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -577,245 +1171,9 @@ private fun StepFinishCard(segment: ResponseSegment) {
                         text = segment.text,
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onPrimaryContainer,
-                    )
-                }
-            }
-        }
-    }
-}
-
-// ─── Expandable Segment (for thinking / tool) ─────────────────────────────
-
-@Composable
-internal fun ExpandableSegment(
-    text: String,
-    isStreaming: Boolean,
-    label: String,
-    icon: ImageVector,
-    containerColor: Color,
-    contentColor: Color,
-) {
-    val s = AppLocale.strings
-    var expanded by remember(isStreaming) { mutableStateOf(isStreaming) }
-
-    Surface(
-        shape = RoundedCornerShape(8.dp),
-        color = containerColor,
-        modifier = Modifier.fillMaxWidth(),
-    ) {
-        Column {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clickable { expanded = !expanded }
-                    .padding(horizontal = 8.dp, vertical = 6.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                if (isStreaming) {
-                    CircularProgressIndicator(
-                        modifier = Modifier.size(14.dp),
-                        strokeWidth = 2.dp,
-                        color = contentColor,
-                    )
-                    Spacer(Modifier.width(6.dp))
-                } else {
-                    Icon(
-                        icon,
-                        contentDescription = null,
-                        modifier = Modifier.size(16.dp),
-                        tint = contentColor,
-                    )
-                    Spacer(Modifier.width(6.dp))
-                }
-                Text(
-                    text = label,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = contentColor,
-                    modifier = Modifier.weight(1f),
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                Icon(
-                    imageVector = if (expanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
-                    contentDescription = if (expanded) s.collapse else s.expand,
-                    modifier = Modifier.size(18.dp),
-                    tint = contentColor.copy(alpha = 0.6f),
-                )
-            }
-
-            AnimatedVisibility(visible = expanded) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(start = 12.dp, end = 8.dp, bottom = 8.dp),
-                ) {
-                    Surface(
-                        shape = RoundedCornerShape(6.dp),
-                        color = containerColor.copy(alpha = 0.6f),
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .horizontalScroll(rememberScrollState())
-                                .padding(8.dp),
-                        ) {
-                            SelectionContainer {
-                                Text(
-                                    text = text,
-                                    fontFamily = FontFamily.Monospace,
-                                    fontSize = 12.sp,
-                                    lineHeight = 16.sp,
-                                    color = contentColor,
-                                )
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun ToolExecutionCard(
-    segment: ResponseSegment,
-    isActive: Boolean,
-) {
-    val s = AppLocale.strings
-    val category = when (segment.toolName) {
-        "bash" -> s.codeExecutionLabel
-        else -> s.toolActivityLabel
-    }
-    StatusSegmentCard(
-        text = segment.text,
-        isStreaming = isActive,
-        label = segment.label ?: ToolSummarizer.summarizeText(segment.text),
-        icon = if (segment.toolName == "bash") Icons.Default.PlayArrow else Icons.Default.Build,
-        status = segment.status.toDisplayStatus(s, isActive),
-        category = category,
-        title = segment.title,
-        containerColor = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.55f),
-        contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
-    )
-}
-
-@Composable
-private fun TaskChainCard(
-    segment: ResponseSegment,
-    isActive: Boolean,
-) {
-    val s = AppLocale.strings
-    val childSessionLine = segment.childSessionId?.let { "${s.childSessionLabel}\n$it" }
-    val detail = listOfNotNull(segment.text.takeIf { it.isNotBlank() }, childSessionLine)
-        .joinToString("\n\n")
-    StatusSegmentCard(
-        text = detail,
-        isStreaming = isActive,
-        label = segment.label ?: s.callChainLabel,
-        icon = Icons.Default.Hub,
-        status = segment.status.toDisplayStatus(s, isActive),
-        category = s.callChainLabel,
-        title = segment.title,
-        containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f),
-        contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
-    )
-}
-
-@Composable
-private fun StatusSegmentCard(
-    text: String,
-    isStreaming: Boolean,
-    label: String,
-    icon: ImageVector,
-    status: String,
-    category: String,
-    containerColor: Color,
-    contentColor: Color,
-    title: String? = null,
-) {
-    val s = AppLocale.strings
-    var expanded by remember(isStreaming) { mutableStateOf(isStreaming) }
-
-    Surface(
-        shape = RoundedCornerShape(10.dp),
-        color = containerColor,
-        modifier = Modifier.fillMaxWidth(),
-    ) {
-        Column {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clickable { expanded = !expanded }
-                    .padding(horizontal = 10.dp, vertical = 8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                if (isStreaming) {
-                    CircularProgressIndicator(
-                        modifier = Modifier.size(14.dp),
-                        strokeWidth = 2.dp,
-                        color = contentColor,
-                    )
-                } else {
-                    Icon(
-                        imageVector = icon,
-                        contentDescription = null,
-                        modifier = Modifier.size(16.dp),
-                        tint = contentColor,
-                    )
-                }
-                Spacer(Modifier.width(8.dp))
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = category,
-                        style = MaterialTheme.typography.labelSmall,
-                        color = contentColor.copy(alpha = 0.78f),
-                    )
-                    Text(
-                        text = title ?: label,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = contentColor,
-                        maxLines = 2,
+                        maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
-                }
-                StatusBadge(status = status, contentColor = contentColor)
-                Spacer(Modifier.width(6.dp))
-                Icon(
-                    imageVector = if (expanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
-                    contentDescription = if (expanded) s.collapse else s.expand,
-                    modifier = Modifier.size(18.dp),
-                    tint = contentColor.copy(alpha = 0.6f),
-                )
-            }
-
-            AnimatedVisibility(visible = expanded) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(start = 10.dp, end = 10.dp, bottom = 10.dp),
-                ) {
-                    HorizontalDivider(color = contentColor.copy(alpha = 0.18f))
-                    Spacer(Modifier.height(8.dp))
-                    Surface(
-                        shape = RoundedCornerShape(8.dp),
-                        color = containerColor.copy(alpha = 0.68f),
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .horizontalScroll(rememberScrollState())
-                                .padding(10.dp),
-                        ) {
-                            SelectionContainer {
-                                Text(
-                                    text = text,
-                                    fontFamily = FontFamily.Monospace,
-                                    fontSize = 12.sp,
-                                    lineHeight = 16.sp,
-                                    color = contentColor,
-                                )
-                            }
-                        }
-                    }
                 }
             }
         }

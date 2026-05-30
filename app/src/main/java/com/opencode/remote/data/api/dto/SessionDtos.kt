@@ -264,8 +264,8 @@ data class SendMessageResponse(
  */
 @Serializable
 data class TodoItem(
-    val content: String,
-    val status: String,
+    val content: String = "",
+    val status: String = "pending",
     val priority: String? = null,
 )
 
@@ -289,4 +289,15 @@ fun MessageInfo.truncateLargeText() = copy(
             else -> part.copy(text = part.text.truncateIfNeeded())
         }
     }
+)
+
+@Serializable
+data class PermissionReplyPayload(
+    val reply: String,
+    val message: String? = null,
+)
+
+@Serializable
+data class QuestionReplyPayload(
+    val answers: List<List<String>>,
 )

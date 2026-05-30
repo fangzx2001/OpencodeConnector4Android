@@ -17,6 +17,9 @@ object ToolSummarizer {
         val status: String?,
         val childSessionId: String? = null,
         val title: String? = null,
+        val inputText: String? = null,
+        val outputText: String? = null,
+        val metadataText: String? = null,
     )
 
     /** Build a summary line from a tool part's structured data.
@@ -32,6 +35,7 @@ object ToolSummarizer {
             toolName = "tool",
             status = part.state?.status,
             title = part.state?.title,
+            outputText = part.text,
         )
         val input = part.state?.input
 
@@ -86,6 +90,9 @@ object ToolSummarizer {
             status = part.state?.status,
             childSessionId = childSessionId,
             title = part.state?.title,
+            inputText = inputSummary,
+            outputText = output,
+            metadataText = metadataSummary,
         )
     }
 
@@ -129,7 +136,7 @@ object ToolSummarizer {
             }
             else -> compactJsonValue(input)
         }
-        return text?.takeIf { it.isNotBlank() }?.let { "Input\n$it" }
+        return text?.takeIf { it.isNotBlank() }
     }
 
     private fun buildMetadataSummary(metadata: JsonElement?): String? {
@@ -137,7 +144,7 @@ object ToolSummarizer {
         val filtered = obj.entries
             .filterNot { (key, _) -> key.equals("sessionId", ignoreCase = true) || key.equals("sessionID", ignoreCase = true) }
             .joinToString("\n") { (key, value) -> "$key: ${compactJsonValue(value)}" }
-        return filtered.takeIf { it.isNotBlank() }?.let { "Metadata\n$it" }
+        return filtered.takeIf { it.isNotBlank() }
     }
 
     private fun compactJsonValue(value: JsonElement): String {

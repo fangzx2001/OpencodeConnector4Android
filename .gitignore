@@ -46,6 +46,7 @@ release/
 
 # Sisyphus internal
 .sisyphus/
+.omo/
 
 # Keystore / signing
 *.jks

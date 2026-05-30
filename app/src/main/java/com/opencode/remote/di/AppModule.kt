@@ -31,6 +31,7 @@ abstract class AppModule {
         fun provideJson(): Json = Json {
             ignoreUnknownKeys = true
             isLenient = true
+            coerceInputValues = true
             encodeDefaults = true
             explicitNulls = false
         }

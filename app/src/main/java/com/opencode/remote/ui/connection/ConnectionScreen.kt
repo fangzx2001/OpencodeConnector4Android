@@ -1,3 +1,4 @@
+@file:Suppress("DEPRECATION")
 package com.opencode.remote.ui.connection
 
 import android.content.Intent

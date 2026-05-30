@@ -36,10 +36,11 @@ data class ProjectSandbox(
  */
 @Serializable
 data class AgentInfo(
-    val name: String,
+    val name: String = "",
     val mode: String? = null,
     val description: String? = null,
-    val hidden: Boolean = false,
+    val hidden: Boolean? = false,
+    val model: AgentModel? = null,
 )
 
 @Serializable
@@ -72,4 +73,29 @@ data class ProviderModelInfo(
 data class ModelLimitInfo(
     val context: Int? = null,
     val output: Int? = null,
+)
+
+@Serializable
+data class FileNode(
+    val name: String = "",
+    val path: String = "",
+    val absolute: String = "",
+    val type: String = "file",
+    val ignored: Boolean = false,
+)
+
+@Serializable
+data class FileContent(
+    val type: String = "text",
+    val content: String = "",
+    val encoding: String? = null,
+    val mimeType: String? = null,
+)
+
+@Serializable
+data class AgentModel(
+    @SerialName("modelID")
+    val modelID: String? = null,
+    @SerialName("providerID")
+    val providerID: String? = null,
 )

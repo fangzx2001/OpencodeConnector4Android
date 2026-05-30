@@ -61,6 +61,7 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalFoundationApi::class, ExperimentalMaterial3Api::class)
+@Suppress("DEPRECATION")
 @Composable
 fun ChatScreen(
     sessionId: String,
@@ -75,6 +76,7 @@ fun ChatScreen(
     val s = AppLocale.strings
     var showRenameDialog by remember { mutableStateOf(false) }
     var renameText by remember(uiState.sessionTitle) { mutableStateOf(uiState.sessionTitle ?: "") }
+    val assistantPanelExpanded = remember(sessionId) { mutableStateMapOf<String, Boolean>() }
 
     LifecycleResumeEffect(sessionId, directory) {
         viewModel.initialize(sessionId, directory)
@@ -244,8 +246,6 @@ fun ChatScreen(
     }
 
     LaunchedEffect(listState, sessionId, totalItems) {
-        var previousIndex = listState.firstVisibleItemIndex
-        var previousOffset = listState.firstVisibleItemScrollOffset
         snapshotFlow {
             Triple(
                 listState.firstVisibleItemIndex,
@@ -268,8 +268,6 @@ fun ChatScreen(
             .collect { (isScrollInProgress, isNearBottomNow) ->
                 if (isProgrammaticScroll) return@collect
 
-                val currentIndex = listState.firstVisibleItemIndex
-                val currentOffset = listState.firstVisibleItemScrollOffset
                 isNearBottom = isNearBottomNow
                 if (isScrollInProgress) {
                     showBottomControl()
@@ -284,9 +282,6 @@ fun ChatScreen(
                 } else if (!isScrollInProgress) {
                     suspendAutoScrollUntilGestureEnds = false
                 }
-
-                previousIndex = currentIndex
-                previousOffset = currentOffset
             }
     }
 
@@ -480,11 +475,27 @@ fun ChatScreen(
                             if (message.role == "user") {
                                 UserMessageItem(message = message)
                             } else {
-                                val segments = remember(message.id) { parseMessageSegments(message) }
+                                val messageRenderKey = remember(message) {
+                                    buildString {
+                                        append(message.id)
+                                        message.parts.forEach { part ->
+                                            append('|')
+                                            append(part.type)
+                                            append(':')
+                                            append(part.text.orEmpty())
+                                            append(':')
+                                            append(part.tool.orEmpty())
+                                        }
+                                    }
+                                }
+                                val segments = remember(messageRenderKey) { parseMessageSegments(message) }
                                 AiResponsePanel(
+                                    messageKey = message.id,
                                     agentName = message.info.agent ?: "AI",
                                     segments = segments,
                                     isStreaming = false,
+                                    expanded = assistantPanelExpanded[message.id] ?: true,
+                                    onExpandedChange = { assistantPanelExpanded[message.id] = it },
                                 )
                             }
                         }
@@ -493,9 +504,12 @@ fun ChatScreen(
                         if (uiState.isStreaming && uiState.streamingSegments.isNotEmpty()) {
                             item(key = "__streaming__") {
                                 AiResponsePanel(
+                                    messageKey = "__streaming__",
                                     agentName = uiState.streamingAgent ?: "AI",
                                     segments = uiState.streamingSegments,
                                     isStreaming = true,
+                                    expanded = assistantPanelExpanded["__streaming__"] ?: true,
+                                    onExpandedChange = { assistantPanelExpanded["__streaming__"] = it },
                                 )
                             }
                         }

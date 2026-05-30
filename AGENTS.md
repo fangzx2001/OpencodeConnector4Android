@@ -25,11 +25,20 @@ OConnector 是一个 Android 客户端，用于连接 OpenCode 服务器，浏�
 
 ## 构建 & 验证
 
-- 基本构建：`./gradlew --no-daemon assembleDebug`
-- 单元测试：`./gradlew --no-daemon testDebugUnitTest`
-- 依赖 Android SDK：设置 `ANDROID_HOME` 与 `ANDROID_SDK_ROOT`
-- 调试包输出：`app/build/outputs/apk/debug/app-debug.apk`
-- 查看任务帮助：`./gradlew --no-daemon help`
+对标 OpenCodeUI 的四层验证管线 (typecheck → lint → test → build):
+
+- **全量验证**: `bash scripts/verify.sh`（= 编译检查 + lint + 单元测试 + 构建 APK）
+- **快速回归**: `bash scripts/verify.sh --quick`（跳过 lint）
+- **分步执行**:
+  - 编译检查: `./gradlew --no-daemon compileDebugKotlin`（allWarningsAsErrors = true）
+  - 代码检查: `./gradlew --no-daemon lintDebug`
+  - 单元测试: `./gradlew --no-daemon testDebugUnitTest`
+  - APK 构建: `./gradlew --no-daemon assembleDebug`
+- **CI**: `.github/workflows/build.yml`（PR + push, Java 21 + Gradle cache）
+- **调试包输出**: `app/build/outputs/apk/debug/app-debug.apk`
+- **APK 归档**: 测试 APK 统一放到 `/home/Android/OC-X-ALPHA-YYYYMMDD-HHMMSS.apk`
+- **工具链严格度**: Kotlin `allWarningsAsErrors = true`（对标 TypeScript strict）
+- **人工验证**: 聊天页 UI 交互（折叠展开、翻译按钮、长按复制）、SSE 流式推送、设备行为
 
 ## 项目内工具
 

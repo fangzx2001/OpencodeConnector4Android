@@ -30,6 +30,9 @@ data class ResponseSegment(
     val stepTokens: MessageTokens? = null,
     val stepCost: Double? = null,
     val stepReason: String? = null,
+    val inputText: String? = null,
+    val outputText: String? = null,
+    val metadataText: String? = null,
 )
 
 data class ContextUsageState(
@@ -585,10 +588,10 @@ class ChatViewModel @Inject constructor(
                     val currentPending = _uiState.value.pendingAssistantMessageId
                     if (currentPending == info.id) return
                     if (completedMessageIds.contains(info.id)) {
-                        Log.d(TAG, "Skipping late message.updated for completed ${info.id?.take(8)}")
+                        Log.d(TAG, "Skipping late message.updated for completed ${info.id.take(8)}")
                         return
                     }
-                    Log.d(TAG, "New assistant msg: ${info.id?.take(8)} agent=${info.agent} segs=${_uiState.value.streamingSegments.size}")
+                    Log.d(TAG, "New assistant msg: ${info.id.take(8)} agent=${info.agent} segs=${_uiState.value.streamingSegments.size}")
                     val agentName = info.agent ?: info.mode ?: _uiState.value.streamingAgent
                     val selectionFromMessage = selectionFromMessageInfo(info, fallbackAgent = agentName)
                     if (selectionFromMessage != null) {

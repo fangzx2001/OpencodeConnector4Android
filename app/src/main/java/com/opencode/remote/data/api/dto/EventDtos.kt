@@ -56,4 +56,37 @@ data class EventProperties(
     val todos: List<TodoItem>? = null,
     val part: MessagePart? = null,
     val info: MessageInfoData? = null,
+    val id: String? = null,
+    val permission: String? = null,
+    val patterns: List<String>? = null,
+    val always: List<String>? = null,
+    val tool: ToolRef? = null,
+    val questions: List<QuestionInfoDto>? = null,
+    val status: StatusData? = null,
+)
+
+@Serializable
+data class ToolRef(
+    val messageID: String? = null,
+    val callID: String? = null,
+)
+
+@Serializable
+data class QuestionInfoDto(
+    val question: String = "",
+    val header: String? = null,
+    val options: List<QuestionOptionDto>? = null,
+    val multiple: Boolean = false,
+    val custom: Boolean = false,
+)
+
+@Serializable
+data class QuestionOptionDto(
+    val label: String = "",
+    val description: String? = null,
+)
+
+@Serializable
+data class StatusData(
+    val type: String = "idle",
 )

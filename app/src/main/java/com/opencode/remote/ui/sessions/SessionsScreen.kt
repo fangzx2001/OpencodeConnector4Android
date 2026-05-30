@@ -1,3 +1,4 @@
+@file:Suppress("DEPRECATION")
 package com.opencode.remote.ui.sessions
 
 import android.content.ClipData
