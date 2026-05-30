@@ -36,7 +36,6 @@ OConnector 是一个 Android 客户端，用于连接 OpenCode 服务器，浏�
   - APK 构建: `./gradlew --no-daemon assembleDebug`
 - **CI**: `.github/workflows/build.yml`（PR + push, Java 21 + Gradle cache）
 - **调试包输出**: `app/build/outputs/apk/debug/app-debug.apk`
-- **APK 归档**: 测试 APK 统一放到 `/home/Android/OC-X-ALPHA-YYYYMMDD-HHMMSS.apk`
 - **工具链严格度**: Kotlin `allWarningsAsErrors = true`（对标 TypeScript strict）
 - **人工验证**: 聊天页 UI 交互（折叠展开、翻译按钮、长按复制）、SSE 流式推送、设备行为
 
