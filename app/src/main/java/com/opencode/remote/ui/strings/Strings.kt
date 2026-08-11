@@ -185,6 +185,10 @@ data class AppStrings(
     val todoCompleted: String,
     val todoCompletedDesc: String,
 
+    // AI completion notification
+    val aiReplyComplete: String,
+    val aiReplyCompleteDesc: String,
+
     // Permission/Question bubbles
     val permissionRequired: String,
     val permissionAllowOnce: String,
@@ -432,6 +436,8 @@ val enStrings = AppStrings(
     notificationChannelDesc = "Keeps connection to server alive",
     todoCompleted = "Tasks Completed",
     todoCompletedDesc = "%s's task list is completed",
+    aiReplyComplete = "AI Reply Complete",
+    aiReplyCompleteDesc = "%s has finished replying",
 
     // Permission/Question bubbles
     permissionRequired = "Permission Required",
@@ -680,6 +686,8 @@ val zhStrings = AppStrings(
     notificationChannelDesc = "保持与服务器的连接",
     todoCompleted = "任务完成",
     todoCompletedDesc = "%s的任务列表已完成",
+    aiReplyComplete = "AI 回复完成",
+    aiReplyCompleteDesc = "%s 的回复已完成",
 
     // Permission/Question bubbles
     permissionRequired = "需要授权",
