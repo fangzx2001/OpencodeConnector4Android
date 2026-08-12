@@ -6,14 +6,17 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.opencode.remote.data.api.dto.ServerInfo
 import com.opencode.remote.data.datastore.ConnectionConfig
+import com.opencode.remote.data.datastore.ConnectionPreferences
 import com.opencode.remote.data.datastore.ServerManager
 import com.opencode.remote.data.repository.OConnectorRepository
+import com.opencode.remote.ui.strings.AppLocale
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.take
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -23,6 +26,7 @@ import javax.inject.Inject
 class ServerListViewModel @Inject constructor(
     private val serverManager: ServerManager,
     private val repository: OConnectorRepository,
+    private val preferences: ConnectionPreferences,
 ) : ViewModel() {
 
     @Immutable
@@ -41,6 +45,7 @@ class ServerListViewModel @Inject constructor(
     }
 
     init {
+        loadPreferences()
         viewModelScope.launch {
             serverManager.migrateIfNeeded()
         }
@@ -131,6 +136,26 @@ class ServerListViewModel @Inject constructor(
     fun deleteServer(id: String) {
         viewModelScope.launch {
             serverManager.deleteServer(id)
+        }
+    }
+
+    /** Load persisted language and dark mode into AppLocale at startup. */
+    private fun loadPreferences() {
+        viewModelScope.launch {
+            preferences.language.take(1).collect { lang ->
+                AppLocale.language = lang
+            }
+            preferences.darkMode.take(1).collect { enabled ->
+                AppLocale.darkMode = enabled
+            }
+        }
+    }
+
+    fun toggleLanguage() {
+        viewModelScope.launch {
+            val newLang = if (AppLocale.language == "en") "zh" else "en"
+            AppLocale.language = newLang
+            preferences.saveLanguage(newLang)
         }
     }
 }

@@ -27,7 +27,6 @@ import com.opencode.remote.ui.sessions.SessionsScreen
 import com.opencode.remote.ui.sessions.ProjectSessionsScreen
 import com.opencode.remote.ui.chat.ChatScreen
 import com.opencode.remote.ui.help.HelpScreen
-import com.opencode.remote.ui.strings.AppLocale
 import com.opencode.remote.ui.update.UpdateViewModel
 
 object Routes {
@@ -118,10 +117,7 @@ fun OConnectorApp(
                 onAddServer = { navController.navigate(Routes.ADD_SERVER) },
                 onServerSelected = { serverId -> viewModel.connectToServer(serverId) },
                 onHelp = { navController.navigate(Routes.HELP) },
-                onToggleLanguage = {
-                    val newLang = if (AppLocale.language == "en") "zh" else "en"
-                    AppLocale.language = newLang
-                },
+                onToggleLanguage = { viewModel.toggleLanguage() },
             )
         }
 
