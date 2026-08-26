@@ -1,0 +1,62 @@
+name: Android CI/CD
+
+on:
+  push:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v7
+    
+    - name: set up JDK 25
+      uses: actions/setup-java@v5
+      with:
+        java-version: '25'
+        distribution: 'zulu'
+        cache: gradle
+
+    - name: Grant execute permission for gradlew
+      run: chmod +x gradlew
+    
+    - name: Calculate Version Info
+      id: version_info
+      env:
+        COMMIT_ID: ${{ github.sha }}
+      run: |
+        COMMIT_ID_SHORT=${COMMIT_ID::7}
+        echo "commit_short=$COMMIT_ID_SHORT" >> $GITHUB_OUTPUT
+
+        COMMIT_COUNT=$(git rev-list --count HEAD)
+        VERSION_CODE=$((COMMIT_COUNT + 1))
+        echo "version_code=$VERSION_CODE" >> $GITHUB_OUTPUT
+        VERSION_NAME="$COMMIT_ID_SHORT"
+        echo "version_name=$VERSION_NAME" >> $GITHUB_OUTPUT
+
+    - name: Modify Gradle Build File
+      run: |
+        GRADLE_FILE="app/build.gradle.kts"
+        sed -i -E "s/versionCode[[:space:]]*=[[:space:]]*[0-9]+/versionCode = ${{ steps.version_info.outputs.version_code }}/g" "$GRADLE_FILE"
+        sed -i -E "s/versionName[[:space:]]*=[[:space:]]*['\"][^'\"]*['\"]/versionName = \"${{ steps.version_info.outputs.version_name }}\"/g" "$GRADLE_FILE"
+          
+    - name: Build with Gradle
+      id: gradle_build
+      continue-on-error: true
+      run: ./gradlew assembleRelease
+
+    - name: Upload Build Artifacts & R8 Missing Rules
+      if: always()
+      uses: actions/upload-artifact@v7
+      with:
+        name: build-outputs
+        path: |
+          ${{ github.workspace }}/app/build/outputs/apk/**/*.apk
+          ${{ github.workspace }}/app/build/outputs/mapping/release/missing_rules.txt
+        if-no-files-found: ignore
+
+    - name: Check Gradle Build Outcome
+      if: steps.gradle_build.outcome == 'failure'
+      run: |
+        echo "::error::Gradle build failed! Please check missing_rules.txt from the uploaded artifacts."
+        exit 1

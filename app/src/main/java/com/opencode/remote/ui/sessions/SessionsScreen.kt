@@ -99,8 +99,12 @@ fun SessionsScreen(
                     }
                     IconButton(onClick = { viewModel.toggleDarkMode() }) {
                         Icon(
-                            if (AppLocale.darkMode) Icons.Default.LightMode else Icons.Default.DarkMode,
-                            contentDescription = if (AppLocale.darkMode) "Light mode" else "Dark mode",
+                            imageVector = when (AppLocale.darkModePref) {
+                                com.opencode.remote.ui.strings.DarkModePref.SYSTEM -> Icons.Default.BrightnessAuto
+                                com.opencode.remote.ui.strings.DarkModePref.DARK -> Icons.Default.DarkMode
+                                com.opencode.remote.ui.strings.DarkModePref.LIGHT -> Icons.Default.LightMode
+                            },
+                            contentDescription = "Dark mode: ${AppLocale.darkModePref.name.lowercase()}",
                         )
                     }
                     IconButton(onClick = { viewModel.loadSessions() }) {
@@ -189,6 +193,7 @@ fun SessionsScreen(
                                 Surface(
                                     color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.9f),
                                     tonalElevation = 1.dp,
+                                    shape = MaterialTheme.shapes.medium,
                                     modifier = Modifier.fillMaxWidth(),
                                 ) {
                                     Text(
@@ -209,7 +214,7 @@ fun SessionsScreen(
                                     sessionCount = sessions.size,
                                     hasBusySessions = directory in busyDirectories,
                                     onClick = { onProjectClick(directory) },
-                                    modifier = Modifier.animateItemPlacement(tween(300)),
+                                    modifier = Modifier.animateItem(tween(300)),
                                 )
                             }
                         }
@@ -531,7 +536,7 @@ fun ProjectSessionsScreen(
                                                     onClick = { onSessionClick(session.id) },
                                                     onDelete = { viewModel.deleteSession(session.id, directory) },
                                                     onFork = { viewModel.forkSession(session.id, directory) },
-                                                    modifier = Modifier.animateItemPlacement(tween(300)),
+                                                    modifier = Modifier.animateItem(tween(300)),
                                                 )
                                             }
                                         } else {
@@ -540,6 +545,7 @@ fun ProjectSessionsScreen(
                                                     Surface(
                                                         color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.9f),
                                                         tonalElevation = 1.dp,
+                                                        shape = MaterialTheme.shapes.medium,
                                                         modifier = Modifier.fillMaxWidth(),
                                                     ) {
                                                         Text(
@@ -578,7 +584,7 @@ fun ProjectSessionsScreen(
                                                                 viewModel.refreshChildSessions(session.id)
                                                             }
                                                         },
-                                                        modifier = Modifier.animateItemPlacement(tween(300)),
+                                                        modifier = Modifier.animateItem(tween(300)),
                                                     )
 
                                                     // Show child sessions when expanded

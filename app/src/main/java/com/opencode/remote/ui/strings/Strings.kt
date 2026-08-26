@@ -4,9 +4,11 @@ import androidx.compose.runtime.*
 
 // ─── Language state ────────────────────────────────────────────────
 
+enum class DarkModePref { SYSTEM, LIGHT, DARK }
+
 object AppLocale {
     var language by mutableStateOf("en")
-    var darkMode by mutableStateOf(false)
+    var darkModePref by mutableStateOf(DarkModePref.SYSTEM)
     val strings: AppStrings get() = if (language == "zh") zhStrings else enStrings
 }
 

@@ -103,7 +103,7 @@ fun ServerListScreen(
                             isConnected = server.id == uiState.connectedServerId,
                             onClick = { onServerSelected(server.id) },
                             onDelete = { viewModel.deleteServer(server.id) },
-                            modifier = Modifier.animateItemPlacement(tween(300)),
+                            modifier = Modifier.animateItem(tween(300)),
                         )
                     }
                 }

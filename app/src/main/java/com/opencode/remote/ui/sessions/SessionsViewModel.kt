@@ -11,6 +11,7 @@ import com.opencode.remote.data.datastore.ConnectionPreferences
 import com.opencode.remote.data.datastore.MemoManager
 import com.opencode.remote.data.repository.OConnectorRepository
 import com.opencode.remote.ui.strings.AppLocale
+import com.opencode.remote.ui.strings.DarkModePref
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
@@ -100,16 +101,20 @@ class SessionsViewModel @Inject constructor(
 
     private fun observeDarkMode() {
         viewModelScope.launch {
-            prefs.darkMode.collect { enabled ->
-                AppLocale.darkMode = enabled
+            prefs.darkModePref.collect { pref ->
+                AppLocale.darkModePref = pref
             }
         }
     }
 
     fun toggleDarkMode() {
         viewModelScope.launch {
-            val newValue = !AppLocale.darkMode
-            AppLocale.darkMode = newValue
+            val newValue = when (AppLocale.darkModePref) {
+                DarkModePref.SYSTEM -> DarkModePref.DARK
+                DarkModePref.DARK -> DarkModePref.LIGHT
+                DarkModePref.LIGHT -> DarkModePref.SYSTEM
+            }
+            AppLocale.darkModePref = newValue
             prefs.saveDarkMode(newValue)
         }
     }

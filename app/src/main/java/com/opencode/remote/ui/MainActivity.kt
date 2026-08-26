@@ -28,7 +28,7 @@ class MainActivity : ComponentActivity() {
         requestNotificationPermissionIfNeeded()
         enableEdgeToEdge()
         setContent {
-            OConnectorTheme(darkTheme = AppLocale.darkMode) {
+            OConnectorTheme(darkThemePref = AppLocale.darkModePref) {
                 OConnectorApp(initialIntent = intent, intentState = intentState)
             }
         }

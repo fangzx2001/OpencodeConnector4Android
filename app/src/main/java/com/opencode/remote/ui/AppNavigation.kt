@@ -1,10 +1,9 @@
 package com.opencode.remote.ui
 
 import android.content.Intent
-import androidx.compose.animation.AnimatedContentTransitionScope
 import androidx.compose.animation.core.tween
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.MutableState
@@ -78,17 +77,17 @@ fun OConnectorApp(
     NavHost(
         navController = navController,
         startDestination = Routes.SERVER_LIST,
-        enterTransition = { fadeIn(animationSpec = tween(300)) + slideIntoContainer(
-            AnimatedContentTransitionScope.SlideDirection.Start, animationSpec = tween(300)
+        enterTransition = { slideInHorizontally(
+            initialOffsetX = { it / 4 }, animationSpec = tween(350)
         ) },
-        exitTransition = { fadeOut(animationSpec = tween(300)) + slideOutOfContainer(
-            AnimatedContentTransitionScope.SlideDirection.Start, animationSpec = tween(300)
+        exitTransition = { slideOutHorizontally(
+            targetOffsetX = { -it / 4 }, animationSpec = tween(350)
         ) },
-        popEnterTransition = { fadeIn(animationSpec = tween(300)) + slideIntoContainer(
-            AnimatedContentTransitionScope.SlideDirection.End, animationSpec = tween(300)
+        popEnterTransition = { slideInHorizontally(
+            initialOffsetX = { -it / 4 }, animationSpec = tween(350)
         ) },
-        popExitTransition = { fadeOut(animationSpec = tween(300)) + slideOutOfContainer(
-            AnimatedContentTransitionScope.SlideDirection.End, animationSpec = tween(300)
+        popExitTransition = { slideOutHorizontally(
+            targetOffsetX = { it / 4 }, animationSpec = tween(350)
         ) },
     ) {
         // === Server List (home) ===
@@ -187,15 +186,18 @@ fun OConnectorApp(
         // === Chat ===
         composable(
             route = Routes.CHAT,
-            enterTransition = { slideIntoContainer(
-                AnimatedContentTransitionScope.SlideDirection.Up, animationSpec = tween(350)
-            ) + fadeIn(animationSpec = tween(300)) },
-            exitTransition = { slideOutOfContainer(
-                AnimatedContentTransitionScope.SlideDirection.Down, animationSpec = tween(350)
-            ) + fadeOut(animationSpec = tween(300)) },
-            popExitTransition = { slideOutOfContainer(
-                AnimatedContentTransitionScope.SlideDirection.Down, animationSpec = tween(350)
-            ) + fadeOut(animationSpec = tween(300)) },
+            enterTransition = { slideInHorizontally(
+                initialOffsetX = { it }, animationSpec = tween(350)
+            ) },
+            exitTransition = { slideOutHorizontally(
+                targetOffsetX = { -it / 3 }, animationSpec = tween(350)
+            ) },
+            popEnterTransition = { slideInHorizontally(
+                initialOffsetX = { -it / 3 }, animationSpec = tween(350)
+            ) },
+            popExitTransition = { slideOutHorizontally(
+                targetOffsetX = { it }, animationSpec = tween(350)
+            ) },
         ) { backStackEntry ->
             val sessionId = backStackEntry.arguments?.getString("sessionId") ?: return@composable
             val encodedDir = backStackEntry.arguments?.getString("directory") ?: ""

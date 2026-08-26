@@ -69,7 +69,7 @@ class ConnectionPreferences @Inject constructor(
         val INSECURE_TRUST = booleanPreferencesKey("connection_insecure_trust")
         val AUTO_RECONNECT = booleanPreferencesKey("connection_auto_reconnect")
         val LANGUAGE = stringPreferencesKey("app_language")
-        val DARK_MODE = booleanPreferencesKey("app_dark_mode")
+        val DARK_MODE = stringPreferencesKey("app_dark_mode")
         val HIDE_CHILD_SESSIONS = booleanPreferencesKey("hide_child_sessions")
         val LIST_DENSITY = stringPreferencesKey("list_density")
     }
@@ -156,11 +156,31 @@ class ConnectionPreferences @Inject constructor(
 
     val darkMode: Flow<Boolean> = context.dataStore.data
         .map { prefs ->
-            prefs[Keys.DARK_MODE] ?: false
+            prefs[Keys.DARK_MODE]?.let { value ->
+                try {
+                    val pref = com.opencode.remote.ui.strings.DarkModePref.valueOf(value)
+                    when (pref) {
+                        com.opencode.remote.ui.strings.DarkModePref.DARK -> true
+                        else -> false
+                    }
+                } catch (_: IllegalArgumentException) { false }
+            } ?: false
         }
         .catch { e ->
             Log.e(TAG, "Failed to read dark mode", e)
             emit(false)
+        }
+
+    val darkModePref: Flow<com.opencode.remote.ui.strings.DarkModePref> = context.dataStore.data
+        .map { prefs ->
+            prefs[Keys.DARK_MODE]?.let { value ->
+                try { com.opencode.remote.ui.strings.DarkModePref.valueOf(value) }
+                catch (_: IllegalArgumentException) { com.opencode.remote.ui.strings.DarkModePref.SYSTEM }
+            } ?: com.opencode.remote.ui.strings.DarkModePref.SYSTEM
+        }
+        .catch { e ->
+            Log.e(TAG, "Failed to read dark mode pref", e)
+            emit(com.opencode.remote.ui.strings.DarkModePref.SYSTEM)
         }
 
     val hideChildSessions: Flow<Boolean> = context.dataStore.data
@@ -180,9 +200,9 @@ class ConnectionPreferences @Inject constructor(
         }
     }
 
-    suspend fun saveDarkMode(enabled: Boolean) {
+    suspend fun saveDarkMode(pref: com.opencode.remote.ui.strings.DarkModePref) {
         try {
-            context.dataStore.edit { it[Keys.DARK_MODE] = enabled }
+            context.dataStore.edit { it[Keys.DARK_MODE] = pref.name }
         } catch (e: Exception) {
             Log.e(TAG, "Failed to save dark mode", e)
         }

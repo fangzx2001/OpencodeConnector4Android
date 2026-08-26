@@ -10,6 +10,7 @@ import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.core.view.WindowCompat
+import com.opencode.remote.ui.strings.DarkModePref
 
 private val LightColorScheme = lightColorScheme(
     primary = Primary,
@@ -53,28 +54,31 @@ private val DarkColorScheme = darkColorScheme(
 
 @Composable
 fun OConnectorTheme(
-    darkTheme: Boolean = isSystemInDarkTheme(),
+    darkThemePref: DarkModePref = DarkModePref.SYSTEM,
     content: @Composable () -> Unit
 ) {
     val context = LocalContext.current
+    val isDark = when (darkThemePref) {
+        DarkModePref.DARK -> true
+        DarkModePref.LIGHT -> false
+        DarkModePref.SYSTEM -> isSystemInDarkTheme()
+    }
     val colorScheme = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-        if (darkTheme) dynamicDarkColorScheme(context)
+        if (isDark) dynamicDarkColorScheme(context)
         else dynamicLightColorScheme(context)
     } else {
-        if (darkTheme) DarkColorScheme else LightColorScheme
+        if (isDark) DarkColorScheme else LightColorScheme
     }
 
     val view = LocalView.current
     if (!view.isInEditMode) {
-        // Use DisposableEffect instead of SideEffect to ensure window colors
-        // update synchronously with the theme — no animation lag.
-        DisposableEffect(darkTheme) {
+        DisposableEffect(isDark) {
             val window = (view.context as Activity).window
             window.statusBarColor = colorScheme.surface.toArgb()
             window.navigationBarColor = colorScheme.surface.toArgb()
             val controller = WindowCompat.getInsetsController(window, view)
-            controller.isAppearanceLightStatusBars = !darkTheme
-            controller.isAppearanceLightNavigationBars = !darkTheme
+            controller.isAppearanceLightStatusBars = !isDark
+            controller.isAppearanceLightNavigationBars = !isDark
             onDispose { }
         }
     }
