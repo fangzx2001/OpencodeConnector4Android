@@ -7,25 +7,19 @@ import kotlinx.serialization.json.JsonElement
 /**
  * 实际 API: GET /project/current
  * 服务器返回 flat JSON: {"id":"global","worktree":"/","time":{...},"sandboxes":[...]}
+ * sandboxes 在 opencode 1.18+ 返回字符串数组（工作区目录），更早版本可能是对象数组。
  */
 @Serializable
 data class ProjectInfo(
     val id: String = "",
     val worktree: String? = null,
     val time: ProjectTime? = null,
-    val sandboxes: List<ProjectSandbox> = emptyList(),
+    val sandboxes: List<String> = emptyList(),
 )
 
 @Serializable
 data class ProjectTime(
     val created: Long? = null,
-)
-
-@Serializable
-data class ProjectSandbox(
-    val id: String? = null,
-    val name: String? = null,
-    val directory: String? = null,
 )
 
 /**

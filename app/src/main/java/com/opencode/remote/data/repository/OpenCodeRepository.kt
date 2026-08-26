@@ -3,6 +3,7 @@ package com.opencode.remote.data.repository
 import android.content.Context
 import android.content.SharedPreferences
 import android.util.Log
+import com.opencode.remote.data.api.ConnectionTestResult
 import com.opencode.remote.data.api.OConnectorApiClient
 import com.opencode.remote.data.api.OConnectorSseClient
 import com.opencode.remote.data.api.dto.*
@@ -85,7 +86,7 @@ interface OConnectorRepository {
 
     // ─── Test Connection ─────────────────────────────────────────────
 
-    suspend fun testConnection(): Boolean
+    suspend fun testConnection(): ConnectionTestResult
 
     // ─── Agents ─────────────────────────────────────────────────────────
 
@@ -442,7 +443,7 @@ class OConnectorRepositoryImpl @Inject constructor(
 
     // ─── Test Connection ─────────────────────────────────────────────
 
-    override suspend fun testConnection(): Boolean =
+    override suspend fun testConnection(): ConnectionTestResult =
         requireClient().testConnection()
 
     // ─── Agents ─────────────────────────────────────────────────────────

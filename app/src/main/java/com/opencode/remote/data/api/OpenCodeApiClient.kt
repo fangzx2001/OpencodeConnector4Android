@@ -13,10 +13,14 @@ import io.ktor.client.engine.okhttp.*
 import io.ktor.client.plugins.*
 import io.ktor.client.plugins.contentnegotiation.*
 import io.ktor.client.request.*
+import io.ktor.client.statement.*
 import io.ktor.http.*
 import io.ktor.serialization.kotlinx.json.*
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.SerializationException
 import javax.inject.Inject
+import java.net.ConnectException
+import java.net.SocketTimeoutException
 import java.net.URLEncoder
 import javax.net.ssl.SSLContext
 import javax.net.ssl.X509TrustManager
@@ -38,6 +42,15 @@ import javax.net.ssl.TrustManager
  *   GET  /session/{id}/todo         → List<TodoItem>
  *   GET  /project/current           → ProjectInfo
  */
+/**
+ * Result of a connectivity test, carrying a human-readable reason on failure
+ * so the UI can show why the connection could not be established.
+ */
+data class ConnectionTestResult(
+    val success: Boolean,
+    val error: String? = null,
+)
+
 class OConnectorApiClient @Inject constructor(
     private val json: Json,
 ) {
@@ -395,13 +408,32 @@ class OConnectorApiClient @Inject constructor(
         return allSessions
     }
 
-    /** Test connectivity by hitting a lightweight endpoint */
-    suspend fun testConnection(): Boolean = try {
-        getCurrentProject()
-        true
+    /** Test connectivity by hitting a lightweight endpoint. */
+    suspend fun testConnection(): ConnectionTestResult = try {
+        val response = client.get("/project/current")
+        if (response.status.isSuccess()) {
+            ConnectionTestResult(success = true)
+        } else {
+            ConnectionTestResult(
+                success = false,
+                error = "HTTP ${response.status.value} (GET /project/current)"
+            )
+        }
     } catch (e: Exception) {
-        Log.w(TAG, "Test connection failed: ${e.javaClass.simpleName}: ${e.message}")
-        false
+        val detail = describeError(e)
+        Log.w(TAG, "Test connection failed: $detail")
+        ConnectionTestResult(success = false, error = detail)
+    }
+
+    /** Build a human-readable reason for a connection failure. */
+    private fun describeError(e: Exception): String = when (e) {
+        is ClientRequestException -> "HTTP ${e.response.status.value} (GET /project/current)"
+        is ServerResponseException -> "HTTP ${e.response.status.value} (GET /project/current)"
+        is HttpRequestTimeoutException -> "请求超时"
+        is SocketTimeoutException -> "连接/读取超时"
+        is ConnectException -> "无法建立 TCP 连接"
+        is SerializationException -> "响应解析失败: ${e.message?.take(200)}"
+        else -> "${e.javaClass.simpleName}: ${e.message?.take(200)}"
     }
 
     // ─── Agents ─────────────────────────────────────────────────────────
