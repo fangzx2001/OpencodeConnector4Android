@@ -13,10 +13,14 @@ import io.ktor.client.engine.okhttp.*
 import io.ktor.client.plugins.*
 import io.ktor.client.plugins.contentnegotiation.*
 import io.ktor.client.request.*
+import io.ktor.client.statement.*
 import io.ktor.http.*
 import io.ktor.serialization.kotlinx.json.*
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.SerializationException
 import javax.inject.Inject
+import java.net.ConnectException
+import java.net.SocketTimeoutException
 import java.net.URLEncoder
 import javax.net.ssl.SSLContext
 import javax.net.ssl.X509TrustManager
@@ -38,6 +42,15 @@ import javax.net.ssl.TrustManager
  *   GET  /session/{id}/todo         → List<TodoItem>
  *   GET  /project/current           → ProjectInfo
  */
+/**
+ * Result of a connectivity test, carrying a human-readable reason on failure
+ * so the UI can show why the connection could not be established.
+ */
+data class ConnectionTestResult(
+    val success: Boolean,
+    val error: String? = null,
+)
+
 class OConnectorApiClient @Inject constructor(
     private val json: Json,
 ) {
@@ -344,6 +357,8 @@ class OConnectorApiClient @Inject constructor(
      * Strategy:
      *   1. GET /project → discover all known projects
      *   2. For normal projects (real worktree): GET /session?list&directory=<worktree>
+     *      — also query every sandbox path: the stored worktree may be stale (e.g. the
+     *        directory was moved to another drive) while sessions live under a sandbox.
      *   3. For global project (worktree="/"): GET /session?list&directory=/&scope=project
      *      — scope=project skips directory matching, returns ALL sessions for that project_id
      *   4. Merge and deduplicate all results
@@ -368,7 +383,12 @@ class OConnectorApiClient @Inject constructor(
                                 // scope=project skips directory filter, returns all sessions for this project_id
                                 listSessions(directory = project.worktree ?: "/", scope = "project")
                             } else {
-                                listSessions(directory = project.worktree)
+                                // Query the worktree AND every sandbox path. The stored worktree may
+                                // point to a moved/removed location (e.g. another drive), while the
+                                // sessions actually live under a sandbox path. Overlapping results
+                                // are deduplicated below by session id.
+                                val directories = (listOfNotNull(project.worktree) + project.sandboxes).distinct()
+                                directories.flatMap { dir -> listSessions(directory = dir) }
                             }
                         } catch (e: Exception) {
                             Log.w(TAG, "Failed to load sessions for project ${project.id} (${project.worktree}): ${e.message}")
@@ -395,13 +415,32 @@ class OConnectorApiClient @Inject constructor(
         return allSessions
     }
 
-    /** Test connectivity by hitting a lightweight endpoint */
-    suspend fun testConnection(): Boolean = try {
-        getCurrentProject()
-        true
+    /** Test connectivity by hitting a lightweight endpoint. */
+    suspend fun testConnection(): ConnectionTestResult = try {
+        val response = client.get("/project/current")
+        if (response.status.isSuccess()) {
+            ConnectionTestResult(success = true)
+        } else {
+            ConnectionTestResult(
+                success = false,
+                error = "HTTP ${response.status.value} (GET /project/current)"
+            )
+        }
     } catch (e: Exception) {
-        Log.w(TAG, "Test connection failed: ${e.javaClass.simpleName}: ${e.message}")
-        false
+        val detail = describeError(e)
+        Log.w(TAG, "Test connection failed: $detail")
+        ConnectionTestResult(success = false, error = detail)
+    }
+
+    /** Build a human-readable reason for a connection failure. */
+    private fun describeError(e: Exception): String = when (e) {
+        is ClientRequestException -> "HTTP ${e.response.status.value} (GET /project/current)"
+        is ServerResponseException -> "HTTP ${e.response.status.value} (GET /project/current)"
+        is HttpRequestTimeoutException -> "请求超时"
+        is SocketTimeoutException -> "连接/读取超时"
+        is ConnectException -> "无法建立 TCP 连接"
+        is SerializationException -> "响应解析失败: ${e.message?.take(200)}"
+        else -> "${e.javaClass.simpleName}: ${e.message?.take(200)}"
     }
 
     // ─── Agents ─────────────────────────────────────────────────────────

@@ -91,11 +91,11 @@ class ServerListViewModel @Inject constructor(
                 }
                 repository.setServerName(server.name)
 
-                val success = withContext(Dispatchers.IO) {
+                val testResult = withContext(Dispatchers.IO) {
                     repository.testConnection()
                 }
 
-                if (success) {
+                if (testResult.success) {
                     // Only start SSE service after connection is confirmed reachable
                     repository.startSseService()
                     serverManager.saveLastActiveServerId(serverId)
@@ -108,7 +108,10 @@ class ServerListViewModel @Inject constructor(
                 } else {
                     repository.disconnect()
                     _uiState.update {
-                        it.copy(isConnecting = false, error = "Connection test failed")
+                        it.copy(
+                            isConnecting = false,
+                            error = testResult.error?.let { "Connection test failed: $it" } ?: "Connection test failed",
+                        )
                     }
                 }
             } catch (e: Exception) {

@@ -132,11 +132,11 @@ class ConnectionViewModel @Inject constructor(
                 preferences.saveConfig(config)
 
                 // Test connection on IO thread
-                val success = withContext(Dispatchers.IO) {
+                val testResult = withContext(Dispatchers.IO) {
                     repository.testConnection()
                 }
 
-                if (success) {
+                if (testResult.success) {
                     // Only start SSE service after connection is confirmed reachable
                     repository.startSseService()
                     // Pre-load agent list for later use
@@ -149,7 +149,7 @@ class ConnectionViewModel @Inject constructor(
                     _uiState.update {
                         it.copy(
                             isConnecting = false,
-                            error = s.errCannotConnect
+                            error = testResult.error?.let { "${s.errCannotConnect}\n$it" } ?: s.errCannotConnect
                         )
                     }
                 }
@@ -218,9 +218,9 @@ class ConnectionViewModel @Inject constructor(
                 withContext(Dispatchers.IO) { repository.connect(config) }
                 repository.setServerName(state.serverName.trim())
 
-                val success = withContext(Dispatchers.IO) { repository.testConnection() }
+                val testResult = withContext(Dispatchers.IO) { repository.testConnection() }
 
-                if (success) {
+                if (testResult.success) {
                     // Only start SSE service after connection is confirmed reachable
                     repository.startSseService()
                     serverManager.saveLastActiveServerId(serverId)
@@ -230,7 +230,7 @@ class ConnectionViewModel @Inject constructor(
                     _uiState.update {
                         it.copy(
                             isConnecting = false,
-                            error = s.errCannotConnect
+                            error = testResult.error?.let { "${s.errCannotConnect}\n$it" } ?: s.errCannotConnect
                         )
                     }
                 }
